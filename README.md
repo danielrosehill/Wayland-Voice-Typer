@@ -1,17 +1,17 @@
-# WhisperTux (AMD GPU Fork)
+# Wayland Voice Typer
 
 ![alt text](screenshots/image.png)
 
-This is a fork of [WhisperTux](https://github.com/cjams/whispertux) - a simple voice dictation application for Linux, modified to support AMD GPU acceleration via Vulkan.
+A voice dictation application for Linux, specifically designed for Wayland desktop environments. This is a fork of [WhisperTux](https://github.com/cjams/whispertux) modified to support AMD GPU acceleration via Vulkan.
 
-## Fork Edits
+## Features
 
-This fork is derived from the original to add AMD GPU support via Vulkan GPU acceleration and support for my custom fine-tunes in addition to standard Whisper variants (if you have your own models, update paths).
-
-- **AMD GPU acceleration** via Vulkan backend for whisper.cpp
-- **Custom finetune model support** for GGML-format models
-- **Improved model discovery** scanning multiple directories for models
-- **Modern PySide6 GUI** with better Wayland/KDE Plasma support
+- **Native Wayland Support**: Built with PySide6 for seamless Wayland/KDE Plasma integration
+- **AMD GPU Acceleration**: Vulkan backend for whisper.cpp on AMD GPUs
+- **Custom Model Support**: Use standard Whisper models or your own GGML finetunes
+- **Flexible Model Discovery**: Scans multiple directories for models
+- **Audio Feedback**: Configurable beeps to indicate recording state
+- **Two Operation Modes**: Live text injection or note collection
 
 ## Tech Stack
 
@@ -139,7 +139,7 @@ The app scans these locations for models:
 
 ## Usage
 
-1. Launch WhisperTux from your application menu or run `whispertux`
+1. Launch Wayland Voice Typer from your application menu or run `./run.sh`
 2. Press F13 (or configured shortcut) to start recording
 3. Speak, then press again to stop
 4. Transcribed text is typed into the focused application (Live mode) or added to notes (Note mode)

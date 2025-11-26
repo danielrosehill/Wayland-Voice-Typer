@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-WhisperTux Fork - Voice dictation application for Linux
+Wayland Voice Typer - Voice dictation application for Linux
 PySide6 GUI with modern styling and KDE Plasma integration
+Fork of WhisperTux with AMD GPU support
 """
 
 import sys
@@ -433,61 +434,108 @@ class AudioFeedback:
 
 
 class AudioLevelWidget(QWidget):
-    """Simple audio level meter widget"""
+    """Enhanced audio level meter widget with smooth animation"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.level = 0.0
+        self.display_level = 0.0  # Smoothed display level
+        self.peak_level = 0.0
+        self.peak_hold_frames = 0
         self.is_recording = False
-        self.setMinimumHeight(30)
-        self.setMaximumHeight(30)
+        self.setMinimumHeight(36)
+        self.setMaximumHeight(36)
+
+        # Animation timer for smooth level changes
+        self._animation_timer = QTimer(self)
+        self._animation_timer.timeout.connect(self._animate_level)
+        self._animation_timer.setInterval(16)  # ~60fps
 
     def set_level(self, level: float):
         """Set the audio level (0.0 to 1.0)"""
         self.level = max(0.0, min(1.0, level))
+        # Update peak with hold
+        if self.level > self.peak_level:
+            self.peak_level = self.level
+            self.peak_hold_frames = 30  # Hold peak for ~0.5s
+        if not self._animation_timer.isActive() and self.is_recording:
+            self._animation_timer.start()
+
+    def _animate_level(self):
+        """Smooth animation for level changes"""
+        # Smooth rise/fall
+        if self.level > self.display_level:
+            self.display_level += (self.level - self.display_level) * 0.3
+        else:
+            self.display_level += (self.level - self.display_level) * 0.15
+
+        # Peak decay
+        if self.peak_hold_frames > 0:
+            self.peak_hold_frames -= 1
+        else:
+            self.peak_level *= 0.95
+
         self.update()
+
+        if not self.is_recording and self.display_level < 0.01:
+            self._animation_timer.stop()
 
     def set_recording(self, recording: bool):
         """Set recording state"""
         self.is_recording = recording
-        if not recording:
+        if recording:
+            self._animation_timer.start()
+        else:
             self.level = 0.0
+            self.peak_level = 0.0
         self.update()
 
     def paintEvent(self, event):
-        """Paint the level meter"""
+        """Paint the level meter with enhanced visuals"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background
+        # Background with subtle gradient feel
         bg_color = QColor(COLORS['surface'])
         painter.fillRect(self.rect(), bg_color)
 
-        # Border
-        painter.setPen(QColor(COLORS['border']))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 6, 6)
+        # Border - highlighted when recording
+        if self.is_recording:
+            painter.setPen(QColor(COLORS['error']))
+        else:
+            painter.setPen(QColor(COLORS['border']))
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
 
-        # Level bar
-        if self.is_recording and self.level > 0:
-            bar_width = int((self.width() - 8) * self.level)
-            bar_rect = self.rect().adjusted(4, 4, -4, -4)
-            bar_rect.setWidth(bar_width)
+        # Level bar with gradient effect
+        if self.display_level > 0.01:
+            bar_width = int((self.width() - 10) * self.display_level)
+            bar_rect = self.rect().adjusted(5, 5, -5, -5)
+            bar_rect.setWidth(max(bar_width, 4))
 
-            # Color based on level
-            if self.level < 0.5:
+            # Color based on level - smooth gradient
+            if self.display_level < 0.4:
                 color = QColor(COLORS['success'])
-            elif self.level < 0.8:
+            elif self.display_level < 0.7:
+                # Blend green to yellow
                 color = QColor(COLORS['warning'])
             else:
                 color = QColor(COLORS['error'])
 
-            painter.fillRect(bar_rect, color)
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(bar_rect, 4, 4)
 
-        # Level markers
+        # Peak indicator line
+        if self.is_recording and self.peak_level > 0.05:
+            peak_x = int(5 + (self.width() - 10) * self.peak_level)
+            painter.setPen(QColor(COLORS['text']))
+            painter.drawLine(peak_x, 6, peak_x, self.height() - 6)
+
+        # Level markers (subtler)
         painter.setPen(QColor(COLORS['border']))
         for pct in [0.25, 0.5, 0.75]:
-            x = int(4 + (self.width() - 8) * pct)
-            painter.drawLine(x, 4, x, self.height() - 4)
+            x = int(5 + (self.width() - 10) * pct)
+            painter.drawLine(x, 8, x, self.height() - 8)
 
 
 class SignalEmitter(QObject):
@@ -1319,7 +1367,7 @@ class BenchmarkDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog for WhisperTux"""
+    """Settings dialog for Wayland Voice Typer"""
 
     def __init__(self, parent, config: ConfigManager, global_shortcuts: GlobalShortcuts,
                  whisper_manager: WhisperManager, update_callback, audio_capture: AudioCapture = None):
@@ -1331,7 +1379,7 @@ class SettingsDialog(QDialog):
         self.audio_capture = audio_capture
         self.parent_window = parent
 
-        self.setWindowTitle("WhisperTux Settings")
+        self.setWindowTitle("Wayland Voice Typer Settings")
         self.setMinimumSize(550, 700)
         self.setModal(True)
 
@@ -1966,8 +2014,8 @@ class WhisperTuxApp(QMainWindow):
 
     def _setup_ui(self):
         """Set up the main UI"""
-        self.setWindowTitle("WhisperTux Fork - Voice Dictation")
-        self.setMinimumSize(500, 680)
+        self.setWindowTitle("Wayland Voice Typer")
+        self.setMinimumSize(480, 580)  # Slightly more compact
 
         # Apply stylesheet
         self.setStyleSheet(get_stylesheet())
@@ -2028,11 +2076,11 @@ class WhisperTuxApp(QMainWindow):
         title_layout.setContentsMargins(12, 0, 0, 0)
         title_layout.setSpacing(4)
 
-        title = QLabel("WhisperTux Fork")
+        title = QLabel("Wayland Voice Typer")
         title.setObjectName("title")
         title_layout.addWidget(title)
 
-        subtitle = QLabel("AMD GPU Support Spin")
+        subtitle = QLabel("Voice Dictation for Wayland/Linux")
         subtitle.setObjectName("subtitle")
         title_layout.addWidget(subtitle)
 
@@ -2042,75 +2090,103 @@ class WhisperTuxApp(QMainWindow):
         return header
 
     def _create_status_card(self):
-        """Create the status display card"""
+        """Create the status display card - compact and scannable"""
         card = QFrame()
         card.setObjectName("card")
         layout = QVBoxLayout(card)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 12, 16, 12)
 
-        # Header row
+        # Header row with prominent status
         header_layout = QHBoxLayout()
-
-        section_title = QLabel("Status")
-        section_title.setObjectName("section_title")
-        header_layout.addWidget(section_title)
-
-        header_layout.addStretch()
+        header_layout.setSpacing(16)
 
         self.status_label = QLabel("Ready")
         self.status_label.setObjectName("status_ready")
+        self.status_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 18px;
+                font-weight: bold;
+                padding: 4px 12px;
+                border-radius: 6px;
+                background-color: {COLORS['surface_light']};
+            }}
+        """)
         header_layout.addWidget(self.status_label)
+
+        header_layout.addStretch()
+
+        # Shortcut badge - most important quick reference
+        shortcut_container = QWidget()
+        shortcut_layout = QHBoxLayout(shortcut_container)
+        shortcut_layout.setContentsMargins(0, 0, 0, 0)
+        shortcut_layout.setSpacing(4)
+        shortcut_icon = QLabel("⌨")
+        shortcut_icon.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 14px;")
+        shortcut_layout.addWidget(shortcut_icon)
+        self.shortcut_display = QLabel(self.config.get_setting('primary_shortcut', 'F12'))
+        self.shortcut_display.setObjectName("info_value")
+        self.shortcut_display.setStyleSheet(f"""
+            QLabel {{
+                font-size: 14px;
+                font-weight: bold;
+                color: {COLORS['primary']};
+                padding: 2px 8px;
+                background-color: {COLORS['surface_light']};
+                border-radius: 4px;
+            }}
+        """)
+        shortcut_layout.addWidget(self.shortcut_display)
+        header_layout.addWidget(shortcut_container)
 
         layout.addLayout(header_layout)
 
-        # Info grid
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(8)
+        # Compact info row - single line for key settings
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(16)
 
         # Model
-        model_row = QHBoxLayout()
+        model_container = QWidget()
+        model_inner = QHBoxLayout(model_container)
+        model_inner.setContentsMargins(0, 0, 0, 0)
+        model_inner.setSpacing(4)
         model_label = QLabel("Model:")
         model_label.setObjectName("info_label")
-        model_row.addWidget(model_label)
+        model_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        model_inner.addWidget(model_label)
         self.model_display = QLabel(self.config.get_setting('model', 'large-v3'))
         self.model_display.setObjectName("info_value")
-        model_row.addWidget(self.model_display)
-        model_row.addStretch()
-        info_layout.addLayout(model_row)
+        self.model_display.setStyleSheet(f"color: {COLORS['text']}; font-size: 12px; font-weight: 500;")
+        model_inner.addWidget(self.model_display)
+        info_layout.addWidget(model_container)
 
-        # Shortcut
-        shortcut_row = QHBoxLayout()
-        shortcut_label = QLabel("Shortcut:")
-        shortcut_label.setObjectName("info_label")
-        shortcut_row.addWidget(shortcut_label)
-        self.shortcut_display = QLabel(self.config.get_setting('primary_shortcut', 'F12'))
-        self.shortcut_display.setObjectName("info_value")
-        shortcut_row.addWidget(self.shortcut_display)
-        shortcut_row.addStretch()
-        info_layout.addLayout(shortcut_row)
+        # Separator
+        sep1 = QLabel("•")
+        sep1.setStyleSheet(f"color: {COLORS['border']};")
+        info_layout.addWidget(sep1)
 
-        # Key delay
-        delay_row = QHBoxLayout()
-        delay_label = QLabel("Key Delay:")
-        delay_label.setObjectName("info_label")
-        delay_row.addWidget(delay_label)
-        self.delay_display = QLabel(f"{self.config.get_setting('key_delay', 15)}ms")
-        self.delay_display.setObjectName("info_value")
-        delay_row.addWidget(self.delay_display)
-        delay_row.addStretch()
-        info_layout.addLayout(delay_row)
-
-        # Microphone
-        mic_row = QHBoxLayout()
-        mic_label = QLabel("Microphone:")
+        # Mic (truncated)
+        mic_container = QWidget()
+        mic_inner = QHBoxLayout(mic_container)
+        mic_inner.setContentsMargins(0, 0, 0, 0)
+        mic_inner.setSpacing(4)
+        mic_label = QLabel("Mic:")
         mic_label.setObjectName("info_label")
-        mic_row.addWidget(mic_label)
+        mic_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        mic_inner.addWidget(mic_label)
         self.mic_display = QLabel(self._get_current_mic_name())
         self.mic_display.setObjectName("info_value")
-        mic_row.addWidget(self.mic_display)
-        mic_row.addStretch()
-        info_layout.addLayout(mic_row)
+        self.mic_display.setStyleSheet(f"color: {COLORS['text']}; font-size: 12px; font-weight: 500;")
+        self.mic_display.setMaximumWidth(150)
+        mic_inner.addWidget(self.mic_display)
+        info_layout.addWidget(mic_container)
+
+        info_layout.addStretch()
+
+        # Key delay (less prominent)
+        self.delay_display = QLabel(f"{self.config.get_setting('key_delay', 15)}ms delay")
+        self.delay_display.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        info_layout.addWidget(self.delay_display)
 
         layout.addLayout(info_layout)
 
@@ -2134,65 +2210,121 @@ class WhisperTuxApp(QMainWindow):
         return card
 
     def _create_transcription_card(self):
-        """Create the transcription text area"""
+        """Create the transcription text area - optimized for quick review"""
         card = QFrame()
         card.setObjectName("card")
         layout = QVBoxLayout(card)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+        layout.setContentsMargins(16, 12, 16, 12)
+
+        # Header with title and action buttons inline
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
 
         trans_title = QLabel("Transcription")
         trans_title.setObjectName("section_title")
-        layout.addWidget(trans_title)
+        header_layout.addWidget(trans_title)
 
-        self.transcription_text = QTextEdit()
-        self.transcription_text.setReadOnly(True)
-        self.transcription_text.setPlaceholderText("Transcriptions will appear here...")
-        layout.addWidget(self.transcription_text)
+        header_layout.addStretch()
 
-        # Buttons
-        btn_layout = QHBoxLayout()
-
+        # Compact action buttons
         copy_btn = QPushButton("Copy")
+        copy_btn.setMinimumHeight(28)
+        copy_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 4px 12px;
+                font-size: 12px;
+            }}
+        """)
         copy_btn.clicked.connect(self._copy_transcription)
-        btn_layout.addWidget(copy_btn)
+        header_layout.addWidget(copy_btn)
 
         clear_btn = QPushButton("Clear")
+        clear_btn.setMinimumHeight(28)
+        clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 4px 12px;
+                font-size: 12px;
+            }}
+        """)
         clear_btn.clicked.connect(self._clear_transcription)
-        btn_layout.addWidget(clear_btn)
+        header_layout.addWidget(clear_btn)
 
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        layout.addLayout(header_layout)
+
+        # Transcription text area with better readability
+        self.transcription_text = QTextEdit()
+        self.transcription_text.setReadOnly(True)
+        self.transcription_text.setPlaceholderText("Transcriptions will appear here...\nUse your hotkey or click the record button to start.")
+        self.transcription_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 15px;
+                font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+                line-height: 1.5;
+            }}
+            QTextEdit:focus {{
+                border-color: {COLORS['primary']};
+            }}
+        """)
+        layout.addWidget(self.transcription_text)
 
         return card
 
     def _create_controls(self):
-        """Create control buttons with icon symbols"""
+        """Create control buttons with icon symbols - optimized for rapid use"""
         controls = QWidget()
         layout = QHBoxLayout(controls)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(12)
 
         quit_btn = QPushButton("Quit")
         quit_btn.setObjectName("danger")
+        quit_btn.setMinimumHeight(40)
         quit_btn.clicked.connect(self.close)
         layout.addWidget(quit_btn)
 
         settings_btn = QPushButton("Settings")
+        settings_btn.setMinimumHeight(40)
         settings_btn.clicked.connect(self._show_settings)
         layout.addWidget(settings_btn)
 
         layout.addStretch()
 
+        # Recording duration label (shows elapsed time during recording)
+        self.duration_label = QLabel("")
+        self.duration_label.setObjectName("info_value")
+        self.duration_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 16px;
+                font-weight: bold;
+                color: {COLORS['text']};
+                padding: 0 12px;
+            }}
+        """)
+        self.duration_label.setVisible(False)
+        layout.addWidget(self.duration_label)
+
+        # Recording duration timer
+        self.duration_timer = QTimer(self)
+        self.duration_timer.timeout.connect(self._update_duration)
+        self.recording_start_time = None
+
         # Pause button (only visible during recording)
         # Using Unicode pause symbol: ⏸ (U+23F8)
         self.pause_btn = QPushButton("⏸")
-        self.pause_btn.setToolTip("Pause recording")
-        self.pause_btn.setMinimumWidth(44)
-        self.pause_btn.setMinimumHeight(44)
+        self.pause_btn.setToolTip("Pause recording (keep audio)")
+        self.pause_btn.setMinimumWidth(52)
+        self.pause_btn.setMinimumHeight(52)
         self.pause_btn.setStyleSheet(f"""
             QPushButton {{
-                font-size: 20px;
+                font-size: 22px;
                 background-color: {COLORS['surface_light']};
+                border-radius: 8px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['border']};
@@ -2202,16 +2334,17 @@ class WhisperTuxApp(QMainWindow):
         self.pause_btn.setVisible(False)  # Hidden until recording starts
         layout.addWidget(self.pause_btn)
 
-        # Record button using Unicode symbols
+        # Record button using Unicode symbols - larger for easy clicking
         # ⏺ (U+23FA) for record, ⏹ (U+23F9) for stop
         self.record_btn = QPushButton("⏺")
-        self.record_btn.setToolTip("Start recording")
+        self.record_btn.setToolTip("Start recording (or use hotkey)")
         self.record_btn.setObjectName("primary")
-        self.record_btn.setMinimumWidth(60)
-        self.record_btn.setMinimumHeight(44)
+        self.record_btn.setMinimumWidth(72)
+        self.record_btn.setMinimumHeight(52)
         self.record_btn.setStyleSheet(f"""
             QPushButton {{
-                font-size: 24px;
+                font-size: 28px;
+                border-radius: 8px;
             }}
             QPushButton#primary {{
                 background-color: {COLORS['success']};
@@ -2232,6 +2365,14 @@ class WhisperTuxApp(QMainWindow):
         layout.addWidget(self.record_btn)
 
         return controls
+
+    def _update_duration(self):
+        """Update the recording duration display"""
+        if self.recording_start_time:
+            elapsed = time.time() - self.recording_start_time
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            self.duration_label.setText(f"{minutes}:{seconds:02d}")
 
     def _setup_global_shortcuts(self):
         """Set up global keyboard shortcuts"""
@@ -2290,7 +2431,7 @@ class WhisperTuxApp(QMainWindow):
         tray_menu.addAction(quit_action)
 
         self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.setToolTip("WhisperTux Fork - Ready")
+        self.tray_icon.setToolTip("Wayland Voice Typer - Ready")
         self.tray_icon.show()
 
     def _create_tray_icons(self):
@@ -2470,24 +2611,37 @@ class WhisperTuxApp(QMainWindow):
         self.pause_btn.setVisible(False)
 
     def _update_status(self, status: str):
-        """Update status display"""
+        """Update status display with color-coded background"""
         self.status_label.setText(status)
 
+        # Determine colors based on status
         if "Recording" in status:
-            self.status_label.setObjectName("status_recording")
+            bg_color = COLORS['error']
+            text_color = COLORS['background']
         elif "Processing" in status:
-            self.status_label.setObjectName("status_processing")
+            bg_color = COLORS['warning']
+            text_color = COLORS['background']
         elif "Paused" in status:
-            self.status_label.setObjectName("status_paused")
+            bg_color = COLORS['warning']
+            text_color = COLORS['background']
         else:
-            self.status_label.setObjectName("status_ready")
+            bg_color = COLORS['surface_light']
+            text_color = COLORS['success']
 
-        # Force style update
-        self.status_label.setStyle(self.status_label.style())
+        self.status_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 18px;
+                font-weight: bold;
+                padding: 4px 12px;
+                border-radius: 6px;
+                background-color: {bg_color};
+                color: {text_color};
+            }}
+        """)
 
         # Update tray tooltip
         if self.tray_icon:
-            self.tray_icon.setToolTip(f"WhisperTux Fork - {status}")
+            self.tray_icon.setToolTip(f"Wayland Voice Typer - {status}")
 
     def _update_recording_ui(self, is_recording: bool):
         """Update UI for recording state"""
@@ -2497,21 +2651,32 @@ class WhisperTuxApp(QMainWindow):
             self.record_btn.setToolTip("Stop recording")
             self.record_btn.setObjectName("recording")
             self.pause_btn.setVisible(True)
+            # Start duration timer
+            self.recording_start_time = time.time()
+            self.duration_label.setText("0:00")
+            self.duration_label.setVisible(True)
+            self.duration_timer.start(1000)  # Update every second
             self._update_status("Recording...")
         elif self.is_processing:
             self.record_btn.setText("⏳")
             self.record_btn.setToolTip("Processing...")
             self.record_btn.setEnabled(False)
             self.pause_btn.setVisible(False)
+            # Stop duration timer but keep showing final duration
+            self.duration_timer.stop()
             self._update_status("Processing...")
         else:
             # Use record symbol ⏺ when ready
             self.record_btn.setText("⏺")
-            self.record_btn.setToolTip("Start recording")
+            self.record_btn.setToolTip("Start recording (or use hotkey)")
             self.record_btn.setObjectName("primary")
             self.record_btn.setEnabled(True)
             self.pause_btn.setVisible(False)
             self.is_paused = False
+            # Hide duration timer
+            self.duration_timer.stop()
+            self.duration_label.setVisible(False)
+            self.recording_start_time = None
             self._update_status("Ready")
 
         # Force style update
@@ -2577,7 +2742,7 @@ class WhisperTuxApp(QMainWindow):
         shortcuts = self.config.get_all_shortcuts()
         toggle_key = shortcuts.get('toggle', 'F13')
         self.shortcut_display.setText(toggle_key)
-        self.delay_display.setText(f"{self.config.get_setting('key_delay', 15)}ms")
+        self.delay_display.setText(f"{self.config.get_setting('key_delay', 15)}ms delay")
         self.mic_display.setText(self._get_current_mic_name())
 
         # Update always on top
@@ -2630,7 +2795,7 @@ def main():
         print("Warning: This application is designed for Linux systems")
 
     app = QApplication(sys.argv)
-    app.setApplicationName("WhisperTux Fork")
+    app.setApplicationName("Wayland Voice Typer")
     app.setStyle("Fusion")  # Use Fusion style for consistent look
 
     window = WhisperTuxApp()
