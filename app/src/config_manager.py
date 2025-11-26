@@ -21,7 +21,11 @@ class ConfigManager:
 
         # Default configuration values
         self.default_config = {
-            'primary_shortcut': 'F13',
+            'primary_shortcut': 'F13',  # Legacy, maps to toggle_shortcut
+            'toggle_shortcut': 'F13',
+            'start_shortcut': '',  # Empty = disabled
+            'stop_shortcut': '',
+            'pause_shortcut': '',
             'model': 'large-v3',
             'custom_model_path': None,  # Direct path to a custom .bin model file
             'model_directories': [      # List of directories to scan for models
@@ -111,11 +115,76 @@ class ConfigManager:
         print("Configuration reset to defaults")
     
     def update_shortcuts(self, primary: Optional[str] = None, secondary: Optional[str] = None):
-        """Update shortcut configuration"""
+        """Update shortcut configuration (legacy method)"""
         if primary is not None:
             self.config['primary_shortcut'] = primary
-            
+            self.config['toggle_shortcut'] = primary
+
         return self.save_config()
+
+    def get_all_shortcuts(self) -> Dict[str, str]:
+        """Get all shortcut settings"""
+        return {
+            'toggle': self.config.get('toggle_shortcut', self.config.get('primary_shortcut', 'F13')),
+            'start': self.config.get('start_shortcut', ''),
+            'stop': self.config.get('stop_shortcut', ''),
+            'pause': self.config.get('pause_shortcut', ''),
+        }
+
+    def set_shortcut(self, name: str, key: str) -> bool:
+        """Set a specific shortcut. Returns False if there's a conflict."""
+        key = key.strip() if key else ''
+
+        # Check for conflicts (if key is not empty)
+        if key:
+            conflict = self.check_shortcut_conflict(name, key)
+            if conflict:
+                return False
+
+        # Map shortcut name to config key
+        config_key = f'{name}_shortcut'
+        self.config[config_key] = key
+
+        # Keep legacy primary_shortcut in sync with toggle
+        if name == 'toggle':
+            self.config['primary_shortcut'] = key
+
+        return True
+
+    def check_shortcut_conflict(self, name: str, key: str) -> Optional[str]:
+        """Check if a shortcut key conflicts with another.
+        Returns the name of the conflicting shortcut, or None if no conflict."""
+        if not key:
+            return None
+
+        key_lower = key.lower().strip()
+        shortcuts = self.get_all_shortcuts()
+
+        for shortcut_name, shortcut_key in shortcuts.items():
+            if shortcut_name == name:
+                continue  # Don't check against itself
+            if shortcut_key and shortcut_key.lower().strip() == key_lower:
+                return shortcut_name
+
+        return None
+
+    def validate_all_shortcuts(self) -> Dict[str, str]:
+        """Validate all shortcuts and return any conflicts.
+        Returns dict of {shortcut_name: conflicting_shortcut_name}"""
+        conflicts = {}
+        shortcuts = self.get_all_shortcuts()
+        seen_keys = {}  # key -> shortcut_name
+
+        for name, key in shortcuts.items():
+            if not key:
+                continue
+            key_lower = key.lower().strip()
+            if key_lower in seen_keys:
+                conflicts[name] = seen_keys[key_lower]
+            else:
+                seen_keys[key_lower] = name
+
+        return conflicts
     
     def get_whisper_model_path(self, model_name: str) -> Path:
         """Get the path to a whisper model file

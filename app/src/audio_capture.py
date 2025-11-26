@@ -27,6 +27,7 @@ class AudioCapture:
         
         # Recording state
         self.is_recording = False
+        self.is_paused = False
         self.is_monitoring = False
         self.audio_data = []
         self.current_level = 0.0
@@ -284,14 +285,47 @@ class AudioCapture:
             self.is_recording = False
             return False
     
+    def pause_recording(self) -> bool:
+        """Pause recording without stopping it"""
+        if not self.is_recording:
+            return False
+
+        with self.lock:
+            self.is_paused = True
+        print("Recording paused")
+        return True
+
+    def resume_recording(self) -> bool:
+        """Resume a paused recording"""
+        if not self.is_recording:
+            return False
+
+        with self.lock:
+            self.is_paused = False
+        print("Recording resumed")
+        return True
+
+    def toggle_pause(self) -> bool:
+        """Toggle pause state. Returns True if now paused, False if resumed."""
+        if not self.is_recording:
+            return False
+
+        with self.lock:
+            self.is_paused = not self.is_paused
+            paused = self.is_paused
+
+        print(f"Recording {'paused' if paused else 'resumed'}")
+        return paused
+
     def stop_recording(self) -> Optional[np.ndarray]:
         """Stop recording and return the recorded audio data"""
         if not self.is_recording:
             return None
-        
+
         # Signal to stop recording
         with self.lock:
             self.is_recording = False
+            self.is_paused = False
         
         # Wait for recording thread to finish
         if self.record_thread and self.record_thread.is_alive():
@@ -318,17 +352,18 @@ class AudioCapture:
             def audio_callback(indata, frames, time_info, status):
                 if status:
                     print(f"Audio callback status: {status}")
-                
+
                 with self.lock:
                     if self.is_recording:
                         # Store the audio data (indata is already numpy array)
                         audio_chunk = indata[:, 0]  # Get mono channel
-                        
-                        # Update current audio level for monitoring
+
+                        # Update current audio level for monitoring (even when paused)
                         self.current_level = np.sqrt(np.mean(audio_chunk**2))
-                        
-                        # Store audio data
-                        self.audio_data.append(audio_chunk.copy())
+
+                        # Only store audio data if not paused
+                        if not self.is_paused:
+                            self.audio_data.append(audio_chunk.copy())
             
             # Determine device to use for recording
             device_to_use = self.preferred_device_id if self.preferred_device_id is not None else None

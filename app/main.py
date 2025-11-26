@@ -104,6 +104,12 @@ def get_stylesheet():
             color: {COLORS['warning']};
         }}
 
+        QLabel#status_paused {{
+            font-size: 15px;
+            font-weight: bold;
+            color: {COLORS['warning']};
+        }}
+
         QLabel#info_label {{
             font-size: 13px;
             color: {COLORS['text_dim']};
@@ -483,6 +489,7 @@ class SignalEmitter(QObject):
     transcription_ready = Signal(str)
     status_update = Signal(str)
     recording_state = Signal(bool)
+    pause_state = Signal(bool)  # True = paused, False = resumed
 
 
 class SettingsDialog(QDialog):
@@ -555,30 +562,119 @@ class SettingsDialog(QDialog):
         layout.addLayout(button_layout)
 
     def _create_shortcuts_section(self):
-        """Create shortcuts configuration section"""
+        """Create shortcuts configuration section with multiple shortcut support"""
         group = QGroupBox("Global Shortcuts")
         layout = QVBoxLayout(group)
         layout.setSpacing(12)
 
-        # Current shortcut display
-        current_layout = QHBoxLayout()
-        current_layout.addWidget(QLabel("Current Shortcut:"))
-        self.current_shortcut_label = QLabel(self.config.get_setting('primary_shortcut', 'F12'))
-        self.current_shortcut_label.setObjectName("info_value")
-        current_layout.addWidget(self.current_shortcut_label)
-        current_layout.addStretch()
-        layout.addLayout(current_layout)
+        # Get current shortcuts
+        shortcuts = self.config.get_all_shortcuts()
 
-        # New shortcut selection
-        shortcut_layout = QHBoxLayout()
-        shortcut_layout.addWidget(QLabel("New Shortcut:"))
-        self.shortcut_combo = QComboBox()
-        self.shortcut_combo.addItems(self._get_shortcut_options())
-        shortcut_layout.addWidget(self.shortcut_combo)
-        shortcut_layout.addStretch()
-        layout.addLayout(shortcut_layout)
+        # Conflict warning label (hidden by default)
+        self.shortcut_conflict_label = QLabel("")
+        self.shortcut_conflict_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: bold;")
+        self.shortcut_conflict_label.setVisible(False)
+        layout.addWidget(self.shortcut_conflict_label)
+
+        # Store combo boxes for validation
+        self.shortcut_combos = {}
+
+        # Toggle shortcut (main shortcut)
+        toggle_layout = QHBoxLayout()
+        toggle_layout.addWidget(QLabel("Toggle (Start/Stop):"))
+        self.toggle_shortcut_combo = QComboBox()
+        self.toggle_shortcut_combo.addItems(self._get_shortcut_options())
+        self.toggle_shortcut_combo.setCurrentText(shortcuts.get('toggle', 'F13'))
+        self.toggle_shortcut_combo.currentTextChanged.connect(lambda: self._validate_shortcuts())
+        toggle_layout.addWidget(self.toggle_shortcut_combo)
+        toggle_layout.addStretch()
+        layout.addLayout(toggle_layout)
+        self.shortcut_combos['toggle'] = self.toggle_shortcut_combo
+
+        # Helper text
+        helper_label = QLabel("Optional: Define separate keys for individual actions")
+        helper_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; margin-top: 8px;")
+        layout.addWidget(helper_label)
+
+        # Start shortcut
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(QLabel("Start Only:"))
+        self.start_shortcut_combo = QComboBox()
+        self.start_shortcut_combo.addItem("(None)", "")
+        self.start_shortcut_combo.addItems(self._get_shortcut_options())
+        if shortcuts.get('start'):
+            idx = self.start_shortcut_combo.findText(shortcuts.get('start'))
+            if idx >= 0:
+                self.start_shortcut_combo.setCurrentIndex(idx)
+        self.start_shortcut_combo.currentTextChanged.connect(lambda: self._validate_shortcuts())
+        start_layout.addWidget(self.start_shortcut_combo)
+        start_layout.addStretch()
+        layout.addLayout(start_layout)
+        self.shortcut_combos['start'] = self.start_shortcut_combo
+
+        # Stop shortcut
+        stop_layout = QHBoxLayout()
+        stop_layout.addWidget(QLabel("Stop Only:"))
+        self.stop_shortcut_combo = QComboBox()
+        self.stop_shortcut_combo.addItem("(None)", "")
+        self.stop_shortcut_combo.addItems(self._get_shortcut_options())
+        if shortcuts.get('stop'):
+            idx = self.stop_shortcut_combo.findText(shortcuts.get('stop'))
+            if idx >= 0:
+                self.stop_shortcut_combo.setCurrentIndex(idx)
+        self.stop_shortcut_combo.currentTextChanged.connect(lambda: self._validate_shortcuts())
+        stop_layout.addWidget(self.stop_shortcut_combo)
+        stop_layout.addStretch()
+        layout.addLayout(stop_layout)
+        self.shortcut_combos['stop'] = self.stop_shortcut_combo
+
+        # Pause shortcut
+        pause_layout = QHBoxLayout()
+        pause_layout.addWidget(QLabel("Pause:"))
+        self.pause_shortcut_combo = QComboBox()
+        self.pause_shortcut_combo.addItem("(None)", "")
+        self.pause_shortcut_combo.addItems(self._get_shortcut_options())
+        if shortcuts.get('pause'):
+            idx = self.pause_shortcut_combo.findText(shortcuts.get('pause'))
+            if idx >= 0:
+                self.pause_shortcut_combo.setCurrentIndex(idx)
+        self.pause_shortcut_combo.currentTextChanged.connect(lambda: self._validate_shortcuts())
+        pause_layout.addWidget(self.pause_shortcut_combo)
+        pause_layout.addStretch()
+        layout.addLayout(pause_layout)
+        self.shortcut_combos['pause'] = self.pause_shortcut_combo
+
+        # Legacy reference (for backward compatibility display)
+        self.shortcut_combo = self.toggle_shortcut_combo
 
         return group
+
+    def _validate_shortcuts(self):
+        """Validate shortcuts for conflicts and update UI"""
+        # Collect all non-empty shortcuts
+        shortcuts = {}
+        for name, combo in self.shortcut_combos.items():
+            key = combo.currentText()
+            if key and key != "(None)":
+                shortcuts[name] = key.lower().strip()
+
+        # Find conflicts
+        seen_keys = {}
+        conflicts = []
+        for name, key in shortcuts.items():
+            if key in seen_keys:
+                conflicts.append(f"'{name}' conflicts with '{seen_keys[key]}' (both use {key.upper()})")
+            else:
+                seen_keys[key] = name
+
+        # Update UI
+        if conflicts:
+            self.shortcut_conflict_label.setText("⚠ " + "; ".join(conflicts))
+            self.shortcut_conflict_label.setVisible(True)
+            return False
+        else:
+            self.shortcut_conflict_label.setVisible(False)
+            return True
 
     def _create_model_section(self):
         """Create model configuration section"""
@@ -586,15 +682,108 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(group)
         layout.setSpacing(12)
 
+        # Model selection
         model_layout = QHBoxLayout()
         model_layout.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
+        self.model_combo.setMinimumWidth(280)
         self._refresh_model_list()
+        self.model_combo.currentTextChanged.connect(self._on_model_changed)
         model_layout.addWidget(self.model_combo)
         model_layout.addStretch()
         layout.addLayout(model_layout)
 
+        # Model path display
+        path_layout = QHBoxLayout()
+        path_label = QLabel("Path:")
+        path_label.setObjectName("info_label")
+        path_layout.addWidget(path_label)
+        self.model_path_label = QLabel("")
+        self.model_path_label.setObjectName("info_label")
+        self.model_path_label.setWordWrap(True)
+        self.model_path_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        path_layout.addWidget(self.model_path_label, 1)
+        layout.addLayout(path_layout)
+
+        # Browse for custom model
+        custom_layout = QHBoxLayout()
+        self.custom_model_entry = QLineEdit()
+        self.custom_model_entry.setPlaceholderText("Or browse for a custom .bin model file...")
+        custom_layout.addWidget(self.custom_model_entry)
+
+        browse_model_btn = QPushButton("Browse")
+        browse_model_btn.clicked.connect(self._browse_custom_model)
+        custom_layout.addWidget(browse_model_btn)
+        layout.addLayout(custom_layout)
+
+        # Add custom model button
+        add_custom_btn = QPushButton("Add Custom Model")
+        add_custom_btn.clicked.connect(self._add_custom_model)
+        layout.addWidget(add_custom_btn)
+
         return group
+
+    def _on_model_changed(self, model_name: str):
+        """Update model path display when selection changes"""
+        if not model_name or model_name == "No models found":
+            self.model_path_label.setText("")
+            return
+
+        # Get path from whisper manager's cached paths
+        if self.whisper_manager and hasattr(self.whisper_manager, '_model_paths'):
+            path = self.whisper_manager._model_paths.get(model_name, "")
+            if path:
+                # Truncate long paths for display
+                display_path = path
+                if len(display_path) > 60:
+                    display_path = "..." + display_path[-57:]
+                self.model_path_label.setText(display_path)
+                self.model_path_label.setToolTip(path)
+            else:
+                self.model_path_label.setText("")
+
+    def _browse_custom_model(self):
+        """Browse for a custom model file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Whisper Model",
+            str(Path.home() / "ai" / "models"),
+            "Whisper Models (*.bin *.ggml);;All Files (*)"
+        )
+        if file_path:
+            self.custom_model_entry.setText(file_path)
+
+    def _add_custom_model(self):
+        """Add a custom model to the list"""
+        custom_path = self.custom_model_entry.text().strip()
+        if not custom_path:
+            QMessageBox.warning(self, "No Path", "Please enter or browse for a model file path.")
+            return
+
+        custom_path = Path(custom_path).expanduser()
+        if not custom_path.exists():
+            QMessageBox.warning(self, "File Not Found", f"Model file not found:\n{custom_path}")
+            return
+
+        if not custom_path.suffix in ['.bin', '.ggml']:
+            QMessageBox.warning(self, "Invalid File", "Please select a .bin or .ggml model file.")
+            return
+
+        # Add to whisper manager's model paths
+        custom_name = f"[Custom] {custom_path.stem}"
+        if self.whisper_manager:
+            if not hasattr(self.whisper_manager, '_model_paths'):
+                self.whisper_manager._model_paths = {}
+            self.whisper_manager._model_paths[custom_name] = str(custom_path)
+
+        # Refresh the dropdown and select the new model
+        self._refresh_model_list()
+        idx = self.model_combo.findText(custom_name)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+
+        self.custom_model_entry.clear()
+        QMessageBox.information(self, "Model Added", f"Custom model added:\n{custom_name}")
 
     def _create_directories_section(self):
         """Create model directories section"""
@@ -729,17 +918,17 @@ class SettingsDialog(QDialog):
 
     def _load_current_settings(self):
         """Load current settings into the UI"""
-        # Shortcut
-        current_shortcut = self.config.get_setting('primary_shortcut', 'F12')
-        idx = self.shortcut_combo.findText(current_shortcut)
-        if idx >= 0:
-            self.shortcut_combo.setCurrentIndex(idx)
+        # Shortcuts are already loaded in _create_shortcuts_section
+        # Just validate them
+        self._validate_shortcuts()
 
         # Model
         current_model = self.config.get_setting('model', 'large-v3')
         idx = self.model_combo.findText(current_model)
         if idx >= 0:
             self.model_combo.setCurrentIndex(idx)
+        # Trigger path display update
+        self._on_model_changed(self.model_combo.currentText())
 
         # Directories
         self._refresh_directories_list()
@@ -808,10 +997,31 @@ class SettingsDialog(QDialog):
     def _save_settings(self):
         """Save all settings"""
         try:
-            new_shortcut = self.shortcut_combo.currentText()
-            old_shortcut = self.config.get_setting('primary_shortcut')
+            # Validate shortcuts first
+            if not self._validate_shortcuts():
+                QMessageBox.warning(self, "Shortcut Conflict",
+                                   "Please resolve the shortcut conflicts before saving.")
+                return
 
-            self.config.set_setting('primary_shortcut', new_shortcut)
+            # Collect new shortcuts
+            new_shortcuts = {}
+            for name, combo in self.shortcut_combos.items():
+                key = combo.currentText()
+                if key == "(None)":
+                    key = ""
+                new_shortcuts[name] = key
+
+            # Get old shortcuts for comparison
+            old_shortcuts = self.config.get_all_shortcuts()
+
+            # Save each shortcut
+            for name, key in new_shortcuts.items():
+                self.config.set_shortcut(name, key)
+
+            # Legacy compatibility
+            self.config.set_setting('primary_shortcut', new_shortcuts.get('toggle', 'F13'))
+
+            # Save other settings
             self.config.set_setting('always_on_top', self.always_on_top_cb.isChecked())
             self.config.set_setting('audio_feedback', self.audio_feedback_cb.isChecked())
             self.config.set_setting('key_delay', self.key_delay_spin.value())
@@ -828,10 +1038,13 @@ class SettingsDialog(QDialog):
                 QMessageBox.critical(self, "Error", "Failed to save settings!")
                 return
 
-            # Update shortcut if changed
-            if new_shortcut != old_shortcut and self.global_shortcuts:
+            # Update shortcuts if changed
+            shortcuts_changed = new_shortcuts != old_shortcuts
+            if shortcuts_changed and self.global_shortcuts:
                 self.global_shortcuts.stop()
-                self.global_shortcuts.update_shortcut(new_shortcut)
+                # Update each shortcut
+                for name, key in new_shortcuts.items():
+                    self.global_shortcuts.update_shortcut_by_name(name, key)
                 self.global_shortcuts.start()
 
             if self.update_callback:
@@ -859,6 +1072,7 @@ class WhisperTuxApp(QMainWindow):
 
         # Application state
         self.is_recording = False
+        self.is_paused = False
         self.is_processing = False
 
         # Signal emitter for thread-safe UI updates
@@ -866,6 +1080,7 @@ class WhisperTuxApp(QMainWindow):
         self.signals.transcription_ready.connect(self._handle_transcription)
         self.signals.status_update.connect(self._update_status)
         self.signals.recording_state.connect(self._update_recording_ui)
+        self.signals.pause_state.connect(self._update_pause_ui)
 
         # Audio monitoring timer
         self.audio_timer = QTimer()
@@ -1085,7 +1300,7 @@ class WhisperTuxApp(QMainWindow):
         return card
 
     def _create_controls(self):
-        """Create control buttons"""
+        """Create control buttons with icon symbols"""
         controls = QWidget()
         layout = QHBoxLayout(controls)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1101,10 +1316,51 @@ class WhisperTuxApp(QMainWindow):
 
         layout.addStretch()
 
-        self.record_btn = QPushButton("Start Recording")
+        # Pause button (only visible during recording)
+        # Using Unicode pause symbol: ⏸ (U+23F8)
+        self.pause_btn = QPushButton("⏸")
+        self.pause_btn.setToolTip("Pause recording")
+        self.pause_btn.setMinimumWidth(44)
+        self.pause_btn.setMinimumHeight(44)
+        self.pause_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 20px;
+                background-color: {COLORS['surface_light']};
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['border']};
+            }}
+        """)
+        self.pause_btn.clicked.connect(self._toggle_pause)
+        self.pause_btn.setVisible(False)  # Hidden until recording starts
+        layout.addWidget(self.pause_btn)
+
+        # Record button using Unicode symbols
+        # ⏺ (U+23FA) for record, ⏹ (U+23F9) for stop
+        self.record_btn = QPushButton("⏺")
+        self.record_btn.setToolTip("Start recording")
         self.record_btn.setObjectName("primary")
-        self.record_btn.setMinimumWidth(160)
+        self.record_btn.setMinimumWidth(60)
         self.record_btn.setMinimumHeight(44)
+        self.record_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 24px;
+            }}
+            QPushButton#primary {{
+                background-color: {COLORS['success']};
+                color: {COLORS['background']};
+            }}
+            QPushButton#primary:hover {{
+                background-color: #8bd49a;
+            }}
+            QPushButton#recording {{
+                background-color: {COLORS['error']};
+                color: {COLORS['background']};
+            }}
+            QPushButton#recording:hover {{
+                background-color: #e57a96;
+            }}
+        """)
         self.record_btn.clicked.connect(self._toggle_recording)
         layout.addWidget(self.record_btn)
 
@@ -1115,10 +1371,22 @@ class WhisperTuxApp(QMainWindow):
         try:
             keyboard_device = self.config.get_setting('keyboard_device', '')
             device_path = keyboard_device if keyboard_device else None
+
+            # Get all shortcut configurations
+            shortcuts = self.config.get_all_shortcuts()
+
             self.global_shortcuts = GlobalShortcuts(
-                primary_key=self.config.get_setting('primary_shortcut', 'F12'),
+                primary_key=self.config.get_setting('primary_shortcut', 'F13'),
                 callback=self._toggle_recording,
-                device_path=device_path
+                device_path=device_path,
+                toggle_key=shortcuts.get('toggle', ''),
+                start_key=shortcuts.get('start', ''),
+                stop_key=shortcuts.get('stop', ''),
+                pause_key=shortcuts.get('pause', ''),
+                toggle_callback=self._toggle_recording,
+                start_callback=self._start_recording,
+                stop_callback=self._stop_recording,
+                pause_callback=self._toggle_pause,
             )
             self.global_shortcuts.start()
             print("Global shortcuts initialized")
@@ -1216,6 +1484,14 @@ class WhisperTuxApp(QMainWindow):
             self._stop_recording()
         else:
             self._start_recording()
+
+    def _toggle_pause(self):
+        """Toggle pause state during recording"""
+        if not self.is_recording:
+            return
+
+        self.is_paused = self.audio_capture.toggle_pause()
+        self.signals.pause_state.emit(self.is_paused)
 
     def _start_recording(self):
         """Start recording"""
@@ -1319,10 +1595,12 @@ class WhisperTuxApp(QMainWindow):
 
     def _reset_record_button(self):
         """Reset the record button to ready state"""
-        self.record_btn.setText("Start Recording")
+        self.record_btn.setText("⏺")
+        self.record_btn.setToolTip("Start recording")
         self.record_btn.setObjectName("primary")
         self.record_btn.setEnabled(True)
         self.record_btn.setStyle(self.record_btn.style())
+        self.pause_btn.setVisible(False)
 
     def _update_status(self, status: str):
         """Update status display"""
@@ -1332,6 +1610,8 @@ class WhisperTuxApp(QMainWindow):
             self.status_label.setObjectName("status_recording")
         elif "Processing" in status:
             self.status_label.setObjectName("status_processing")
+        elif "Paused" in status:
+            self.status_label.setObjectName("status_paused")
         else:
             self.status_label.setObjectName("status_ready")
 
@@ -1345,17 +1625,26 @@ class WhisperTuxApp(QMainWindow):
     def _update_recording_ui(self, is_recording: bool):
         """Update UI for recording state"""
         if is_recording:
-            self.record_btn.setText("Stop Recording")
+            # Use stop symbol ⏹ when recording
+            self.record_btn.setText("⏹")
+            self.record_btn.setToolTip("Stop recording")
             self.record_btn.setObjectName("recording")
+            self.pause_btn.setVisible(True)
             self._update_status("Recording...")
         elif self.is_processing:
-            self.record_btn.setText("Processing...")
+            self.record_btn.setText("⏳")
+            self.record_btn.setToolTip("Processing...")
             self.record_btn.setEnabled(False)
+            self.pause_btn.setVisible(False)
             self._update_status("Processing...")
         else:
-            self.record_btn.setText("Start Recording")
+            # Use record symbol ⏺ when ready
+            self.record_btn.setText("⏺")
+            self.record_btn.setToolTip("Start recording")
             self.record_btn.setObjectName("primary")
             self.record_btn.setEnabled(True)
+            self.pause_btn.setVisible(False)
+            self.is_paused = False
             self._update_status("Ready")
 
         # Force style update
@@ -1363,6 +1652,39 @@ class WhisperTuxApp(QMainWindow):
 
         # Update tray icon based on recording state
         self._update_tray_icon(is_recording)
+
+    def _update_pause_ui(self, is_paused: bool):
+        """Update UI for pause state"""
+        if is_paused:
+            # Use play symbol ▶ to indicate "click to resume"
+            self.pause_btn.setText("▶")
+            self.pause_btn.setToolTip("Resume recording")
+            self.pause_btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 20px;
+                    background-color: {COLORS['warning']};
+                    color: {COLORS['background']};
+                }}
+                QPushButton:hover {{
+                    background-color: #e5d09e;
+                }}
+            """)
+            self._update_status("Paused")
+        else:
+            # Use pause symbol ⏸
+            self.pause_btn.setText("⏸")
+            self.pause_btn.setToolTip("Pause recording")
+            self.pause_btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 20px;
+                    background-color: {COLORS['surface_light']};
+                }}
+                QPushButton:hover {{
+                    background-color: {COLORS['border']};
+                }}
+            """)
+            if self.is_recording:
+                self._update_status("Recording...")
 
     def _copy_transcription(self):
         """Copy transcription to clipboard"""
@@ -1383,7 +1705,10 @@ class WhisperTuxApp(QMainWindow):
     def _update_displays(self):
         """Update all display labels from config"""
         self.model_display.setText(self.config.get_setting('model', 'large-v3'))
-        self.shortcut_display.setText(self.config.get_setting('primary_shortcut', 'F12'))
+        # Show toggle shortcut in main display
+        shortcuts = self.config.get_all_shortcuts()
+        toggle_key = shortcuts.get('toggle', 'F13')
+        self.shortcut_display.setText(toggle_key)
         self.delay_display.setText(f"{self.config.get_setting('key_delay', 15)}ms")
         self.mic_display.setText(self._get_current_mic_name())
 

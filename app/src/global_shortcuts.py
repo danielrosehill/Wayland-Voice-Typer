@@ -14,33 +14,75 @@ from evdev import InputDevice, categorize, ecodes
 
 class GlobalShortcuts:
     """Handles global keyboard shortcuts using evdev for hardware-level capture"""
-    
-    def __init__(self, primary_key: str = '<f12>', callback: Optional[Callable] = None, device_path: Optional[str] = None):
+
+    def __init__(self, primary_key: str = '<f12>', callback: Optional[Callable] = None,
+                 device_path: Optional[str] = None,
+                 toggle_key: Optional[str] = None,
+                 start_key: Optional[str] = None,
+                 stop_key: Optional[str] = None,
+                 pause_key: Optional[str] = None,
+                 toggle_callback: Optional[Callable] = None,
+                 start_callback: Optional[Callable] = None,
+                 stop_callback: Optional[Callable] = None,
+                 pause_callback: Optional[Callable] = None):
+        # Legacy support: primary_key maps to toggle
         self.primary_key = primary_key
-        self.callback = callback
+        self.callback = callback  # Legacy callback for primary_key
         self.selected_device_path = device_path
-        
+
+        # New multi-shortcut support
+        self.shortcuts: Dict[str, Dict] = {}  # name -> {keys: Set[int], callback: Callable, last_trigger: float}
+
         # Device and event handling
         self.devices = []
         self.device_fds = {}
         self.listener_thread = None
         self.is_running = False
         self.stop_event = threading.Event()
-        
+
         # State tracking
         self.pressed_keys = set()
-        self.last_trigger_time = 0
         self.debounce_time = 0.5  # 500ms debounce to prevent double triggers
-        
-        # Parse the primary key combination
+
+        # Parse and register shortcuts
+        # Toggle shortcut (primary, uses legacy primary_key if toggle_key not set)
+        effective_toggle = toggle_key if toggle_key else primary_key
+        if effective_toggle:
+            self._register_shortcut('toggle', effective_toggle, toggle_callback or callback)
+
+        # Individual action shortcuts
+        if start_key:
+            self._register_shortcut('start', start_key, start_callback)
+        if stop_key:
+            self._register_shortcut('stop', stop_key, stop_callback)
+        if pause_key:
+            self._register_shortcut('pause', pause_key, pause_callback)
+
+        # For legacy compatibility
         self.target_keys = self._parse_key_combination(primary_key)
-        
+
         # Initialize keyboard devices
         self._discover_keyboards()
-        
-        print(f"Global shortcuts initialized with key: {primary_key}")
-        print(f"Parsed keys: {[self._keycode_to_name(k) for k in self.target_keys]}")
+
+        print(f"Global shortcuts initialized")
+        for name, shortcut in self.shortcuts.items():
+            key_names = [self._keycode_to_name(k) for k in shortcut['keys']]
+            print(f"  {name}: {key_names}")
         print(f"Found {len(self.devices)} keyboard device(s)")
+
+    def _register_shortcut(self, name: str, key_string: str, callback: Optional[Callable]):
+        """Register a shortcut with a name, key combination, and callback"""
+        if not key_string or not callback:
+            return
+
+        keys = self._parse_key_combination(key_string)
+        if keys:
+            self.shortcuts[name] = {
+                'keys': keys,
+                'callback': callback,
+                'last_trigger': 0,
+                'key_string': key_string
+            }
         
     def _discover_keyboards(self):
         """Discover and initialize keyboard input devices"""
@@ -240,17 +282,34 @@ class GlobalShortcuts:
                 self.pressed_keys.discard(event.code)
     
     def _check_shortcut_combination(self):
-        """Check if current pressed keys match target combination"""
-        if self.target_keys.issubset(self.pressed_keys):
-            current_time = time.time()
-            
-            # Implement debouncing
-            if current_time - self.last_trigger_time > self.debounce_time:
-                self.last_trigger_time = current_time
-                self._trigger_callback()
-    
+        """Check if current pressed keys match any registered shortcut"""
+        current_time = time.time()
+
+        # Check all registered shortcuts
+        for name, shortcut in self.shortcuts.items():
+            if shortcut['keys'].issubset(self.pressed_keys):
+                # Implement debouncing per-shortcut
+                if current_time - shortcut['last_trigger'] > self.debounce_time:
+                    shortcut['last_trigger'] = current_time
+                    self._trigger_shortcut_callback(name, shortcut)
+                    # Only trigger one shortcut per key press
+                    return
+
+    def _trigger_shortcut_callback(self, name: str, shortcut: Dict):
+        """Trigger a specific shortcut's callback"""
+        callback = shortcut.get('callback')
+        if callback:
+            try:
+                key_string = shortcut.get('key_string', 'unknown')
+                print(f"Global shortcut '{name}' triggered: {key_string}")
+                # Run callback in a separate thread to avoid blocking the listener
+                callback_thread = threading.Thread(target=callback, daemon=True)
+                callback_thread.start()
+            except Exception as e:
+                print(f"Error calling shortcut callback for '{name}': {e}")
+
     def _trigger_callback(self):
-        """Trigger the callback function"""
+        """Trigger the legacy callback function (for backwards compatibility)"""
         if self.callback:
             try:
                 print(f"Global shortcut triggered: {self.primary_key}")
@@ -317,21 +376,65 @@ class GlobalShortcuts:
         self.callback = callback
     
     def update_shortcut(self, new_key: str) -> bool:
-        """Update the shortcut key combination"""
+        """Update the primary/toggle shortcut key combination (legacy method)"""
+        return self.update_shortcut_by_name('toggle', new_key)
+
+    def update_shortcut_by_name(self, name: str, new_key: str, callback: Optional[Callable] = None) -> bool:
+        """Update a specific shortcut by name"""
         try:
+            if not new_key:
+                # Remove the shortcut if key is empty/None
+                if name in self.shortcuts:
+                    del self.shortcuts[name]
+                    print(f"Removed shortcut '{name}'")
+                return True
+
             # Parse the new key combination
             new_target_keys = self._parse_key_combination(new_key)
-            
-            # Update the configuration
-            self.primary_key = new_key
-            self.target_keys = new_target_keys
-            
-            print(f"Updated global shortcut to: {new_key}")
+
+            if name in self.shortcuts:
+                # Update existing shortcut
+                self.shortcuts[name]['keys'] = new_target_keys
+                self.shortcuts[name]['key_string'] = new_key
+                if callback:
+                    self.shortcuts[name]['callback'] = callback
+            else:
+                # Create new shortcut (requires callback)
+                if callback:
+                    self._register_shortcut(name, new_key, callback)
+                else:
+                    print(f"Cannot create new shortcut '{name}' without callback")
+                    return False
+
+            # Update legacy fields for 'toggle'
+            if name == 'toggle':
+                self.primary_key = new_key
+                self.target_keys = new_target_keys
+
+            print(f"Updated shortcut '{name}' to: {new_key}")
             return True
-            
+
         except Exception as e:
-            print(f"Failed to update shortcut: {e}")
+            print(f"Failed to update shortcut '{name}': {e}")
             return False
+
+    def set_shortcut_callback(self, name: str, callback: Callable):
+        """Set or update the callback for a specific shortcut"""
+        if name in self.shortcuts:
+            self.shortcuts[name]['callback'] = callback
+        # Also update legacy callback for 'toggle'
+        if name == 'toggle':
+            self.callback = callback
+
+    def get_shortcut_key(self, name: str) -> Optional[str]:
+        """Get the key string for a specific shortcut"""
+        if name in self.shortcuts:
+            return self.shortcuts[name].get('key_string')
+        return None
+
+    def get_all_shortcuts(self) -> Dict[str, str]:
+        """Get all registered shortcuts as name -> key_string dict"""
+        return {name: shortcut.get('key_string', '') for name, shortcut in self.shortcuts.items()}
     
     def test_shortcut(self) -> bool:
         """Test if shortcuts are working by temporarily setting a test callback"""
