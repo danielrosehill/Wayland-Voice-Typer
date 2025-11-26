@@ -17,6 +17,11 @@ class ConfigManager:
         self.default_config = {
             'primary_shortcut': 'F13',
             'model': 'base',
+            'custom_model_path': None,  # Direct path to a custom .bin model file
+            'model_directories': [      # List of directories to scan for models
+                str(Path.home() / "ai" / "models" / "stt" / "whisper-cpp"),
+                str(Path.home() / "ai" / "models" / "stt" / "finetunes"),
+            ],
             'key_delay': 15,  # Delay between keystrokes in milliseconds for ydotool
             'use_clipboard': False,
             'window_position': None,
@@ -105,30 +110,103 @@ class ConfigManager:
         return self.save_config()
     
     def get_whisper_model_path(self, model_name: str) -> Path:
-        """Get the path to a whisper model file"""
-        # Use centralized model directory
-        model_dir = Path.home() / "ai" / "models" / "stt" / "whisper-cpp"
+        """Get the path to a whisper model file
 
-        # Handle different model naming conventions
-        if model_name.endswith('.en'):
-            # English-only model
-            model_filename = f"ggml-{model_name}.bin"
-        else:
-            # Multilingual model - check both .en.bin and .bin versions
-            en_model_path = model_dir / f"ggml-{model_name}.en.bin"
-            multi_model_path = model_dir / f"ggml-{model_name}.bin"
+        Supports:
+        - Standard model names (tiny, base, small, medium, large)
+        - Custom model paths (absolute paths to .bin files)
+        - Scanning multiple model directories
+        """
+        # Check if custom_model_path is set and we're asking for the current model
+        custom_path = self.config.get('custom_model_path')
+        if custom_path and model_name == self.config.get('model'):
+            custom_path = Path(custom_path)
+            if custom_path.exists():
+                return custom_path
 
-            # Prefer English-only version if both exist
-            if en_model_path.exists():
-                return en_model_path
-            elif multi_model_path.exists():
-                return multi_model_path
+        # If model_name is an absolute path, use it directly
+        if model_name and (model_name.startswith('/') or model_name.startswith('~')):
+            expanded_path = Path(model_name).expanduser()
+            if expanded_path.exists():
+                return expanded_path
+
+        # Get model directories from config
+        model_dirs = self.config.get('model_directories', [
+            str(Path.home() / "ai" / "models" / "stt" / "whisper-cpp")
+        ])
+
+        # Search for the model in each directory
+        for model_dir_str in model_dirs:
+            model_dir = Path(model_dir_str).expanduser()
+            if not model_dir.exists():
+                continue
+
+            # Handle different model naming conventions
+            if model_name.endswith('.en'):
+                # English-only model
+                model_path = model_dir / f"ggml-{model_name}.bin"
+                if model_path.exists():
+                    return model_path
             else:
-                # Default to English-only path for error messages
-                return en_model_path
+                # Check both .en.bin and .bin versions
+                en_model_path = model_dir / f"ggml-{model_name}.en.bin"
+                multi_model_path = model_dir / f"ggml-{model_name}.bin"
 
-        model_path = model_dir / model_filename
-        return model_path
+                if en_model_path.exists():
+                    return en_model_path
+                elif multi_model_path.exists():
+                    return multi_model_path
+
+            # Also check for generic ggml-model.bin (common for finetunes)
+            generic_path = model_dir / "ggml-model.bin"
+            if generic_path.exists() and model_name in str(model_dir):
+                return generic_path
+
+        # Default fallback: return expected path in first model directory
+        default_dir = Path(model_dirs[0]).expanduser() if model_dirs else Path.home() / "ai" / "models" / "stt" / "whisper-cpp"
+        return default_dir / f"ggml-{model_name}.en.bin"
+
+    def get_model_directories(self) -> list:
+        """Get list of model directories"""
+        return self.config.get('model_directories', [
+            str(Path.home() / "ai" / "models" / "stt" / "whisper-cpp")
+        ])
+
+    def add_model_directory(self, directory: str) -> bool:
+        """Add a new directory to scan for models"""
+        dirs = self.config.get('model_directories', [])
+        expanded = str(Path(directory).expanduser())
+        if expanded not in dirs:
+            dirs.append(expanded)
+            self.config['model_directories'] = dirs
+            return True
+        return False
+
+    def remove_model_directory(self, directory: str) -> bool:
+        """Remove a directory from model scanning"""
+        dirs = self.config.get('model_directories', [])
+        expanded = str(Path(directory).expanduser())
+        if expanded in dirs:
+            dirs.remove(expanded)
+            self.config['model_directories'] = dirs
+            return True
+        return False
+
+    def set_custom_model_path(self, path: Optional[str]) -> bool:
+        """Set a custom model path (absolute path to .bin file)"""
+        if path:
+            expanded = Path(path).expanduser()
+            if expanded.exists() and expanded.suffix == '.bin':
+                self.config['custom_model_path'] = str(expanded)
+                return True
+            return False
+        else:
+            self.config['custom_model_path'] = None
+            return True
+
+    def get_custom_model_path(self) -> Optional[str]:
+        """Get the current custom model path"""
+        return self.config.get('custom_model_path')
 
     def get_whisper_binary_path(self) -> Path:
         """Get the path to the whisper binary"""
