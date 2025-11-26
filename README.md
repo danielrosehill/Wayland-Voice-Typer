@@ -27,8 +27,14 @@ python3 setup.py
 ### From Debian Package
 
 ```bash
-./build/build-deb.sh
-sudo dpkg -i build/whispertux_*.deb
+./build-deb.sh
+sudo dpkg -i whispertux_*.deb
+```
+
+Or use the install script:
+
+```bash
+./install.sh
 ```
 
 ## Original Project
