@@ -1032,34 +1032,6 @@ class WhisperTuxApp(QMainWindow):
 
         layout.addLayout(info_layout)
 
-        # Mode selector
-        mode_layout = QHBoxLayout()
-        mode_label = QLabel("Mode:")
-        mode_label.setObjectName("info_label")
-        mode_layout.addWidget(mode_label)
-
-        self.mode_group = QButtonGroup(self)
-
-        self.live_mode_btn = QRadioButton("Live Text Entry")
-        self.note_mode_btn = QRadioButton("Note Entry")
-
-        self.mode_group.addButton(self.live_mode_btn, 0)
-        self.mode_group.addButton(self.note_mode_btn, 1)
-
-        current_mode = self.config.get_setting('operation_mode', 'live_text_entry')
-        if current_mode == 'live_text_entry':
-            self.live_mode_btn.setChecked(True)
-        else:
-            self.note_mode_btn.setChecked(True)
-
-        self.mode_group.buttonClicked.connect(self._on_mode_change)
-
-        mode_layout.addWidget(self.live_mode_btn)
-        mode_layout.addWidget(self.note_mode_btn)
-        mode_layout.addStretch()
-
-        layout.addLayout(mode_layout)
-
         return card
 
     def _create_audio_card(self):
@@ -1087,11 +1059,9 @@ class WhisperTuxApp(QMainWindow):
         layout.setSpacing(12)
         layout.setContentsMargins(20, 16, 20, 16)
 
-        current_mode = self.config.get_setting('operation_mode', 'live_text_entry')
-        label_text = "Notes" if current_mode == 'note_entry' else "Transcription Log"
-        self.trans_title = QLabel(label_text)
-        self.trans_title.setObjectName("section_title")
-        layout.addWidget(self.trans_title)
+        trans_title = QLabel("Transcription")
+        trans_title.setObjectName("section_title")
+        layout.addWidget(trans_title)
 
         self.transcription_text = QTextEdit()
         self.transcription_text.setReadOnly(True)
@@ -1240,16 +1210,6 @@ class WhisperTuxApp(QMainWindow):
             pass
         return "default"
 
-    def _on_mode_change(self, button):
-        """Handle mode change"""
-        if button == self.live_mode_btn:
-            self.config.set_setting('operation_mode', 'live_text_entry')
-            self.trans_title.setText("Transcription Log")
-        else:
-            self.config.set_setting('operation_mode', 'note_entry')
-            self.trans_title.setText("Notes")
-        self.config.save_config()
-
     def _toggle_recording(self):
         """Toggle recording state"""
         if self.is_recording:
@@ -1334,23 +1294,15 @@ class WhisperTuxApp(QMainWindow):
         self.is_processing = False
         self._reset_record_button()
 
-        current_mode = self.config.get_setting('operation_mode', 'live_text_entry')
-
         if transcription and transcription.strip():
             cleaned = transcription.strip()
             blank_indicators = ["[blank_audio]", "(blank)", "(silence)", "[silence]", "[BLANK_AUDIO]"]
             is_blank = any(indicator.lower() in cleaned.lower() for indicator in blank_indicators)
 
             if not is_blank:
-                if current_mode == 'live_text_entry':
-                    try:
-                        self.text_injector.inject_text(cleaned)
-                        self._update_status("Text injected")
-                    except Exception:
-                        self._update_status("Injection failed")
-                else:
-                    self.transcription_text.append(cleaned)
-                    self._update_status("Note added")
+                # Always output to text area (no injection)
+                self.transcription_text.append(cleaned)
+                self._update_status("Transcription added")
             else:
                 self._update_status("No speech detected")
         else:
@@ -1432,6 +1384,21 @@ class WhisperTuxApp(QMainWindow):
         else:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
         self.show()
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts when app is focused"""
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_C:
+                # Ctrl+C: Copy transcription to clipboard
+                self._copy_transcription()
+                event.accept()
+                return
+            elif event.key() == Qt.Key.Key_S:
+                # Ctrl+S: Start/Stop recording
+                self._toggle_recording()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def closeEvent(self, event):
         """Handle window close"""
