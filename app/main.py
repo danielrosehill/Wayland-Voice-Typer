@@ -413,7 +413,7 @@ class AudioFeedback:
             # Generate sine wave with fade in/out to avoid clicks
             t = i / sample_rate
             fade = min(i / 500, (num_samples - i) / 500, 1.0)  # Fade over ~11ms
-            value = int(32767 * fade * 0.5 * math.sin(2 * math.pi * frequency * t))
+            value = int(32767 * fade * 0.25 * math.sin(2 * math.pi * frequency * t))  # 50% quieter
             # Pack as signed 16-bit little-endian
             samples.append(value & 0xFF)
             samples.append((value >> 8) & 0xFF)
@@ -1300,9 +1300,18 @@ class WhisperTuxApp(QMainWindow):
             is_blank = any(indicator.lower() in cleaned.lower() for indicator in blank_indicators)
 
             if not is_blank:
-                # Always output to text area (no injection)
+                # Show in text area for reference
                 self.transcription_text.append(cleaned)
-                self._update_status("Transcription added")
+
+                # Inject text as a single batch operation (not character-by-character streaming)
+                # This waits for full transcription then types it all at once
+                # Future: LLM text editing step can be inserted here before injection
+                success = self.text_injector.inject_text(cleaned)
+
+                if success:
+                    self._update_status("Text injected")
+                else:
+                    self._update_status("Copied to clipboard")
             else:
                 self._update_status("No speech detected")
         else:
