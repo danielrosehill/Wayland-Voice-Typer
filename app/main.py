@@ -310,26 +310,32 @@ def get_stylesheet():
         QGroupBox {{
             font-size: 14px;
             font-weight: bold;
-            color: {COLORS['primary']};
+            color: {COLORS['text']};
+            background-color: transparent;
             border: 1px solid {COLORS['border']};
             border-radius: 8px;
-            margin-top: 16px;
-            padding: 16px 12px 12px 12px;
+            margin-top: 20px;
+            padding-top: 16px;
         }}
 
         QGroupBox::title {{
             subcontrol-origin: margin;
             subcontrol-position: top left;
-            left: 12px;
-            top: 4px;
-            padding: 0 8px;
-            background-color: {COLORS['background']};
-            color: {COLORS['primary']};
+            left: 10px;
+            padding: 2px 10px;
+            background-color: {COLORS['primary']};
+            color: {COLORS['background']};
+            border-radius: 4px;
+        }}
+
+        QGroupBox QLabel {{
+            color: {COLORS['text']};
         }}
 
         QRadioButton {{
             font-size: 13px;
             spacing: 8px;
+            color: {COLORS['text']};
         }}
 
         QRadioButton::indicator {{
@@ -343,6 +349,14 @@ def get_stylesheet():
         QRadioButton::indicator:checked {{
             background-color: {COLORS['primary']};
             border-color: {COLORS['primary']};
+        }}
+
+        QMessageBox {{
+            background-color: {COLORS['background']};
+        }}
+
+        QMessageBox QLabel {{
+            color: {COLORS['text']};
         }}
     """
 
@@ -1096,10 +1110,9 @@ class WhisperTuxApp(QMainWindow):
 
         self.tray_icon = QSystemTrayIcon(self)
 
-        # Create icon
-        icon_pixmap = QPixmap(32, 32)
-        icon_pixmap.fill(QColor(COLORS['primary']))
-        self.tray_icon.setIcon(QIcon(icon_pixmap))
+        # Create tray icons for different states
+        self._create_tray_icons()
+        self.tray_icon.setIcon(self.tray_icon_idle)
 
         # Create menu
         tray_menu = QMenu()
@@ -1121,6 +1134,46 @@ class WhisperTuxApp(QMainWindow):
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.setToolTip("WhisperTux Fork - Ready")
         self.tray_icon.show()
+
+    def _create_tray_icons(self):
+        """Create icons for different tray states using standard theme icons"""
+        # Try to use standard Freedesktop/KDE theme icons
+        # For recording: media-record (red circle) is the standard recording indicator
+        # For idle: audio-input-microphone or similar
+
+        # Recording icon - red circle (standard recording indicator)
+        self.tray_icon_recording = QIcon.fromTheme("media-record")
+        if self.tray_icon_recording.isNull():
+            # Fallback: create a red circle
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setBrush(QColor("#ff5555"))  # Red color
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(2, 2, 28, 28)
+            painter.end()
+            self.tray_icon_recording = QIcon(pixmap)
+
+        # Idle icon - microphone or media-playback-stop
+        self.tray_icon_idle = QIcon.fromTheme("audio-input-microphone")
+        if self.tray_icon_idle.isNull():
+            self.tray_icon_idle = QIcon.fromTheme("media-playback-stop")
+        if self.tray_icon_idle.isNull():
+            # Fallback: create a blue square (original design)
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(QColor(COLORS['primary']))
+            self.tray_icon_idle = QIcon(pixmap)
+
+    def _update_tray_icon(self, is_recording: bool):
+        """Update the system tray icon based on recording state"""
+        if not self.tray_icon:
+            return
+
+        if is_recording:
+            self.tray_icon.setIcon(self.tray_icon_recording)
+        else:
+            self.tray_icon.setIcon(self.tray_icon_idle)
 
     def _position_window(self):
         """Position window in bottom-left corner"""
