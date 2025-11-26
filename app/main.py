@@ -7,6 +7,7 @@ PySide6 GUI with modern styling and KDE Plasma integration
 import sys
 import threading
 import time
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -361,6 +362,64 @@ def get_stylesheet():
     """
 
 
+class AudioFeedback:
+    """Provides audio feedback beeps for recording state changes"""
+
+    @staticmethod
+    def play_start_beep():
+        """Play a high-pitched beep when recording starts"""
+        try:
+            # High-pitched beep (1000Hz, 100ms)
+            subprocess.Popen(
+                ['paplay', '--raw', '--rate=44100', '--channels=1', '--format=s16le'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            ).communicate(input=AudioFeedback._generate_tone(1000, 0.1))
+        except Exception:
+            # Fallback to beep command or just ignore
+            try:
+                subprocess.run(['beep', '-f', '1000', '-l', '100'],
+                             capture_output=True, timeout=1)
+            except Exception:
+                pass
+
+    @staticmethod
+    def play_stop_beep():
+        """Play a lower-pitched beep when recording stops"""
+        try:
+            # Lower-pitched beep (600Hz, 150ms)
+            subprocess.Popen(
+                ['paplay', '--raw', '--rate=44100', '--channels=1', '--format=s16le'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            ).communicate(input=AudioFeedback._generate_tone(600, 0.15))
+        except Exception:
+            try:
+                subprocess.run(['beep', '-f', '600', '-l', '150'],
+                             capture_output=True, timeout=1)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _generate_tone(frequency: int, duration: float) -> bytes:
+        """Generate a simple sine wave tone"""
+        import math
+        sample_rate = 44100
+        num_samples = int(sample_rate * duration)
+        samples = []
+        for i in range(num_samples):
+            # Generate sine wave with fade in/out to avoid clicks
+            t = i / sample_rate
+            fade = min(i / 500, (num_samples - i) / 500, 1.0)  # Fade over ~11ms
+            value = int(32767 * fade * 0.5 * math.sin(2 * math.pi * frequency * t))
+            # Pack as signed 16-bit little-endian
+            samples.append(value & 0xFF)
+            samples.append((value >> 8) & 0xFF)
+        return bytes(samples)
+
+
 class AudioLevelWidget(QWidget):
     """Simple audio level meter widget"""
 
@@ -486,11 +545,6 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(cancel_btn)
 
-        reset_btn = QPushButton("Reset to Defaults")
-        reset_btn.setObjectName("danger")
-        reset_btn.clicked.connect(self._reset_defaults)
-        button_layout.addWidget(reset_btn)
-
         button_layout.addStretch()
 
         save_btn = QPushButton("Save Settings")
@@ -593,6 +647,10 @@ class SettingsDialog(QDialog):
         self.always_on_top_cb = QCheckBox("Keep window always on top")
         layout.addWidget(self.always_on_top_cb)
 
+        # Audio feedback
+        self.audio_feedback_cb = QCheckBox("Play audio feedback when recording starts/stops")
+        layout.addWidget(self.audio_feedback_cb)
+
         # Key delay
         delay_layout = QHBoxLayout()
         delay_layout.addWidget(QLabel("Key Delay (ms):"))
@@ -688,6 +746,7 @@ class SettingsDialog(QDialog):
 
         # General
         self.always_on_top_cb.setChecked(self.config.get_setting('always_on_top', True))
+        self.audio_feedback_cb.setChecked(self.config.get_setting('audio_feedback', True))
         self.key_delay_spin.setValue(self.config.get_setting('key_delay', 15))
 
         # Audio device
@@ -746,13 +805,6 @@ class SettingsDialog(QDialog):
         self._refresh_model_list()
         QMessageBox.information(self, "Models Refreshed", "Model list has been refreshed.")
 
-    def _reset_defaults(self):
-        """Reset to default settings"""
-        if QMessageBox.question(self, "Reset Settings",
-                                "Reset all settings to defaults?") == QMessageBox.StandardButton.Yes:
-            self.config.reset_to_defaults()
-            self._load_current_settings()
-
     def _save_settings(self):
         """Save all settings"""
         try:
@@ -761,6 +813,7 @@ class SettingsDialog(QDialog):
 
             self.config.set_setting('primary_shortcut', new_shortcut)
             self.config.set_setting('always_on_top', self.always_on_top_cb.isChecked())
+            self.config.set_setting('audio_feedback', self.audio_feedback_cb.isChecked())
             self.config.set_setting('key_delay', self.key_delay_spin.value())
             self.config.set_setting('audio_device', self.mic_combo.currentData())
             self.config.set_setting('keyboard_device', self.kb_combo.currentData())
@@ -1136,34 +1189,28 @@ class WhisperTuxApp(QMainWindow):
         self.tray_icon.show()
 
     def _create_tray_icons(self):
-        """Create icons for different tray states using standard theme icons"""
-        # Try to use standard Freedesktop/KDE theme icons
-        # For recording: media-record (red circle) is the standard recording indicator
-        # For idle: audio-input-microphone or similar
+        """Create icons for different tray states"""
+        # Recording icon - red filled circle
+        pixmap_rec = QPixmap(32, 32)
+        pixmap_rec.fill(Qt.transparent)
+        painter = QPainter(pixmap_rec)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor("#ff5555"))  # Red color
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(2, 2, 28, 28)
+        painter.end()
+        self.tray_icon_recording = QIcon(pixmap_rec)
 
-        # Recording icon - red circle (standard recording indicator)
-        self.tray_icon_recording = QIcon.fromTheme("media-record")
-        if self.tray_icon_recording.isNull():
-            # Fallback: create a red circle
-            pixmap = QPixmap(32, 32)
-            pixmap.fill(Qt.transparent)
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setBrush(QColor("#ff5555"))  # Red color
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(2, 2, 28, 28)
-            painter.end()
-            self.tray_icon_recording = QIcon(pixmap)
-
-        # Idle icon - microphone or media-playback-stop
-        self.tray_icon_idle = QIcon.fromTheme("audio-input-microphone")
-        if self.tray_icon_idle.isNull():
-            self.tray_icon_idle = QIcon.fromTheme("media-playback-stop")
-        if self.tray_icon_idle.isNull():
-            # Fallback: create a blue square (original design)
-            pixmap = QPixmap(32, 32)
-            pixmap.fill(QColor(COLORS['primary']))
-            self.tray_icon_idle = QIcon(pixmap)
+        # Idle icon - blue filled circle (visible on any background)
+        pixmap_idle = QPixmap(32, 32)
+        pixmap_idle.fill(Qt.transparent)
+        painter = QPainter(pixmap_idle)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor(COLORS['primary']))  # Blue color
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(2, 2, 28, 28)
+        painter.end()
+        self.tray_icon_idle = QIcon(pixmap_idle)
 
     def _update_tray_icon(self, is_recording: bool):
         """Update the system tray icon based on recording state"""
@@ -1219,6 +1266,10 @@ class WhisperTuxApp(QMainWindow):
             self.is_recording = True
             self.signals.recording_state.emit(True)
 
+            # Play start beep if enabled
+            if self.config.get_setting('audio_feedback', True):
+                threading.Thread(target=AudioFeedback.play_start_beep, daemon=True).start()
+
             # Start audio monitoring
             self.audio_meter.set_recording(True)
             self.audio_timer.start(50)
@@ -1245,6 +1296,10 @@ class WhisperTuxApp(QMainWindow):
         self.is_recording = False
         self.is_processing = True
         self.signals.recording_state.emit(False)
+
+        # Play stop beep if enabled
+        if self.config.get_setting('audio_feedback', True):
+            threading.Thread(target=AudioFeedback.play_stop_beep, daemon=True).start()
 
         # Stop audio monitoring
         self.audio_timer.stop()
@@ -1344,6 +1399,9 @@ class WhisperTuxApp(QMainWindow):
 
         # Force style update
         self.record_btn.setStyle(self.record_btn.style())
+
+        # Update tray icon based on recording state
+        self._update_tray_icon(is_recording)
 
     def _copy_transcription(self):
         """Copy transcription to clipboard"""
