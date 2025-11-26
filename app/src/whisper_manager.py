@@ -51,15 +51,19 @@ class WhisperManager:
             # Scan for available models to populate the cache
             self.get_available_models()
 
+            # Migrate old model name format to new display name format
+            self._migrate_model_name()
+
             # Set model path based on current model - check cached paths first
             self.model_path = self.get_model_path(self.current_model)
 
             if self.model_path is None or not self.model_path.exists():
-                # Try config manager as fallback
-                self.model_path = self.config.get_whisper_model_path(self.current_model)
+                # Try config manager as fallback with internal name conversion
+                internal_name = self._get_internal_name(self.current_model)
+                self.model_path = self.config.get_whisper_model_path(internal_name)
 
             # Check if model exists
-            if not self.model_path.exists():
+            if self.model_path is None or not self.model_path.exists():
                 print(f"ERROR: Whisper model not found at: {self.model_path}")
                 print(f"  Please download the {self.current_model} model first")
                 return False
@@ -73,6 +77,34 @@ class WhisperManager:
         except Exception as e:
             print(f"ERROR: Failed to initialize Whisper manager: {e}")
             return False
+
+    def _migrate_model_name(self):
+        """Migrate old model name format to new display name format"""
+        old_name = self.current_model
+        stock_models = ['tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3', 'large-v3-turbo']
+        migrated = False
+
+        # Check if it's an old-style stock model name (e.g., "medium.en" or "medium")
+        base_name = old_name.replace('.en', '')
+        if base_name in stock_models and not old_name.endswith(' stock'):
+            new_name = f"{base_name} stock"
+            print(f"Migrating model name from '{old_name}' to '{new_name}'")
+            self.current_model = new_name
+            self.config.set_setting('model', new_name)
+            migrated = True
+
+        # Check if it's an old-style finetune name (e.g., "[Finetune] name")
+        elif old_name.startswith('[Finetune] '):
+            finetune_name = old_name[11:]  # Remove "[Finetune] " prefix
+            new_name = f"{finetune_name} - fine tune"
+            print(f"Migrating model name from '{old_name}' to '{new_name}'")
+            self.current_model = new_name
+            self.config.set_setting('model', new_name)
+            migrated = True
+
+        # Save config if migrated
+        if migrated:
+            self.config.save_config()
     
     def is_ready(self) -> bool:
         """Check if whisper is ready for transcription"""
@@ -194,7 +226,7 @@ class WhisperManager:
         Change the whisper model
 
         Args:
-            model_name: Name of the model (e.g., 'base', 'small', '[Finetune] finetune_base')
+            model_name: Display name of the model (e.g., 'base stock', 'small stock', 'daniel-fine-tune-base - fine tune')
 
         Returns:
             True if successful, False otherwise
@@ -204,10 +236,11 @@ class WhisperManager:
             new_model_path = self.get_model_path(model_name)
 
             if new_model_path is None or not new_model_path.exists():
-                # Try config manager as fallback
-                new_model_path = self.config.get_whisper_model_path(model_name)
+                # Try config manager as fallback with internal name conversion
+                internal_name = self._get_internal_name(model_name)
+                new_model_path = self.config.get_whisper_model_path(internal_name)
 
-            if not new_model_path.exists():
+            if new_model_path is None or not new_model_path.exists():
                 print(f"ERROR: Model {model_name} not found at {new_model_path}")
                 return False
 
@@ -219,7 +252,7 @@ class WhisperManager:
             self.config.set_setting('model', model_name)
 
             # If it's a finetune or custom model, also store the full path
-            if model_name.startswith('[Finetune]') or model_name.startswith('[Custom]'):
+            if model_name.endswith(' - fine tune') or model_name.startswith('[Custom]'):
                 self.config.set_custom_model_path(str(new_model_path))
             else:
                 self.config.set_custom_model_path(None)
@@ -355,8 +388,8 @@ class WhisperManager:
                     # Check for ggml-model.bin in this directory (common finetune convention)
                     ggml_model = item / "ggml-model.bin"
                     if ggml_model.exists():
-                        # Use directory name as finetune name
-                        display_name = f"[Finetune] {item.name}"
+                        # Use directory name as finetune name with "- fine tune" suffix
+                        display_name = f"{item.name} - fine tune"
 
                         # Avoid duplicates
                         base_display_name = display_name
@@ -379,9 +412,13 @@ class WhisperManager:
                     standard_patterns = ['ggml-tiny', 'ggml-base', 'ggml-small', 'ggml-medium', 'ggml-large']
                     is_standard = any(stem_lower.startswith(p) for p in standard_patterns)
 
-                    if not is_standard and 'ggml' in stem_lower:
-                        # This looks like a custom/finetune model
-                        display_name = f"[Finetune] {item.stem}"
+                    # Check if it looks like a finetune (contains "ggml" or "fine-tune" or "finetune")
+                    is_finetune = ('ggml' in stem_lower or 'fine-tune' in stem_lower or
+                                   'finetune' in stem_lower or 'fine_tune' in stem_lower)
+
+                    if not is_standard and is_finetune:
+                        # This looks like a custom/finetune model - use "- fine tune" suffix
+                        display_name = f"{item.stem} - fine tune"
 
                         # Avoid duplicates
                         base_display_name = display_name
