@@ -252,13 +252,14 @@ class SettingsDialog:
 
         # Get available models from whisper manager
         try:
-            # Access the parent's whisper manager through the parent window
+            # Access the whisper manager through the app instance
             available_models = []
-            if hasattr(self.parent, 'whisper_manager'):
-                available_models = self.parent.whisper_manager.get_available_models()
+            if self.app_instance and hasattr(self.app_instance, 'whisper_manager'):
+                available_models = self.app_instance.whisper_manager.get_available_models()
             if not available_models:
                 available_models = ["No models found"]
-        except:
+        except Exception as e:
+            print(f"Error getting models: {e}")
             available_models = ["No models found"]
 
         self.model_var = tk.StringVar(value=self.config.get_setting('model', 'base'))
@@ -267,7 +268,7 @@ class SettingsDialog:
             textvariable=self.model_var,
             values=available_models,
             state="readonly",
-            width=15
+            width=35  # Wider to accommodate finetune names
         )
         self.model_combo_dialog.pack(side=RIGHT)
 
