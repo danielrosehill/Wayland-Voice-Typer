@@ -17,20 +17,16 @@ class ConfigManager:
         # Resolve project paths early for defaults
         self.project_root = Path(__file__).resolve().parent.parent
         self.local_models_dir = self.project_root / "whisper.cpp" / "models"
-        self.openai_whisper_dir = Path.home() / "ai" / "models" / "stt" / "openai-whisper" / "models"
         self.local_whisper_binary = self.project_root / "whisper.cpp" / "build" / "bin" / "whisper-cli"
 
         # Default configuration values
         self.default_config = {
             'primary_shortcut': 'F13',
-            'model': 'large-v3',
+            'model': 'large-v3-turbo',
             'custom_model_path': None,  # Direct path to a custom .bin model file
             'model_directories': [      # List of directories to scan for models
                 str(self.local_models_dir),
                 str(Path.home() / "ai" / "models" / "stt" / "whisper-cpp"),
-                str(self.openai_whisper_dir),
-                str(Path.home() / "ai" / "models" / "stt" / "finetunes"),
-                str(Path.home() / "ai" / "models" / "stt" / "by-program" / "dsnote"),  # Contains large-v3-turbo
             ],
             'key_delay': 15,  # Delay between keystrokes in milliseconds for ydotool
             'use_clipboard': False,
@@ -152,6 +148,20 @@ class ConfigManager:
             model_dir = Path(model_dir_str).expanduser()
             if not model_dir.exists():
                 continue
+
+            # Special handling for large-v3-turbo with alternate naming conventions
+            if model_name == 'large-v3-turbo':
+                turbo_patterns = [
+                    model_dir / "ggml-large-v3-turbo.bin",
+                    model_dir / "ggml-large-v3-turbo.en.bin",
+                    model_dir / "multilang_whisper_large3_turbo.ggml",
+                    model_dir / "whisper_large3_turbo.ggml",
+                    model_dir / "large-v3-turbo.ggml",
+                    model_dir / "ggml-large-v3-turbo.ggml",
+                ]
+                for turbo_file in turbo_patterns:
+                    if turbo_file.exists():
+                        return turbo_file
 
             # Handle different model naming conventions
             if model_name.endswith('.en'):

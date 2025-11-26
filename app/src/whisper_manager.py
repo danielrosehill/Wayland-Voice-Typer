@@ -152,6 +152,7 @@ class WhisperManager:
                 '-m', str(self.model_path),
                 '-f', audio_file_path,
                 '--output-txt',
+                '--no-timestamps',
                 '--language', 'en',
                 '--threads', str(threads)
             ]
@@ -287,7 +288,7 @@ class WhisperManager:
                         model_paths['large-v3-turbo'] = str(turbo_file)
                         break
 
-            # Recursively scan for ggml-model.bin files (finetunes)
+            # Scan for finetune models in this directory
             self._scan_for_finetunes(model_dir, available_models, model_paths)
 
         # Add custom model path if set
@@ -303,61 +304,21 @@ class WhisperManager:
 
         return available_models
 
-    def _scan_for_finetunes(self, base_dir: Path, models_list: list, paths_dict: dict, max_depth: int = 5):
-        """Recursively scan directory for finetune models (ggml-model.bin files)"""
+    def _scan_for_finetunes(self, base_dir: Path, models_list: list, paths_dict: dict, max_depth: int = 3):
+        """Scan directory for finetune models (.bin files)"""
         if max_depth <= 0:
             return
 
         try:
             for item in base_dir.iterdir():
                 if item.is_dir():
-                    # Check for ggml-model.bin in this directory
+                    # Check for ggml-model.bin in this directory (common finetune convention)
                     ggml_model = item / "ggml-model.bin"
                     if ggml_model.exists():
-                        # Get the full path relative to base_dir for analysis
-                        try:
-                            rel_path = ggml_model.relative_to(base_dir)
-                            path_parts = rel_path.parts[:-1]  # Exclude the filename
-                        except ValueError:
-                            path_parts = [item.name]
+                        # Use directory name as finetune name
+                        display_name = f"[Finetune] {item.name}"
 
-                        # Try to extract meaningful name from path
-                        # Look for directories that contain 'finetune', 'acft', or model identifiers
-                        finetune_name = None
-                        is_finetune = 'finetune' in str(ggml_model).lower() or 'acft' in str(ggml_model).lower()
-
-                        for part in path_parts:
-                            part_lower = part.lower()
-                            # Skip generic directory names
-                            if part_lower in ['inference-formats', 'ggml-whisper-cpp', 'ggml', 'v2', 'models']:
-                                continue
-                            # Look for finetune identifier
-                            if 'finetune' in part_lower or 'acft' in part_lower or 'whisper' in part_lower:
-                                finetune_name = part
-                                # Don't break - prefer later (more specific) matches
-
-                        # Build display name
-                        label = "[Finetune]" if is_finetune else "[Custom]"
-                        if finetune_name:
-                            display_name = f"{label} {finetune_name}"
-                        else:
-                            # Use the parent directory name as identifier
-                            # Go up from ggml/ggml-whisper-cpp to find meaningful name
-                            parent_chain = []
-                            current = item.parent
-                            for _ in range(4):
-                                if current.name.lower() not in ['inference-formats', 'ggml-whisper-cpp', 'ggml']:
-                                    parent_chain.insert(0, current.name)
-                                current = current.parent
-                                if current == base_dir:
-                                    break
-                            if parent_chain:
-                                display_name = f"{label} {parent_chain[-1]}"
-                            else:
-                                display_name = f"{label} {item.parent.name}"
-
-                        # Avoid duplicates by checking the path, not just the name
-                        # If same name exists but different path, add suffix
+                        # Avoid duplicates
                         base_display_name = display_name
                         counter = 1
                         while display_name in paths_dict and paths_dict[display_name] != str(ggml_model):
@@ -370,6 +331,28 @@ class WhisperManager:
 
                     # Recurse into subdirectories
                     self._scan_for_finetunes(item, models_list, paths_dict, max_depth - 1)
+
+                elif item.is_file() and item.suffix == '.bin':
+                    # Check for standalone .bin files that look like finetunes
+                    # Skip standard model files (they're already handled above)
+                    stem_lower = item.stem.lower()
+                    standard_patterns = ['ggml-tiny', 'ggml-base', 'ggml-small', 'ggml-medium', 'ggml-large']
+                    is_standard = any(stem_lower.startswith(p) for p in standard_patterns)
+
+                    if not is_standard and 'ggml' in stem_lower:
+                        # This looks like a custom/finetune model
+                        display_name = f"[Finetune] {item.stem}"
+
+                        # Avoid duplicates
+                        base_display_name = display_name
+                        counter = 1
+                        while display_name in paths_dict and paths_dict[display_name] != str(item):
+                            display_name = f"{base_display_name} ({counter})"
+                            counter += 1
+
+                        if display_name not in models_list:
+                            models_list.append(display_name)
+                            paths_dict[display_name] = str(item)
 
         except PermissionError:
             pass  # Skip directories we can't read

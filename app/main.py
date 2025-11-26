@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 WhisperTux - Voice dictation application for Linux
+Modern CustomTkinter GUI
 """
 
+import customtkinter as ctk
+from tkinter import messagebox
 import tkinter as tk
-from tkinter import ttk, messagebox
-import ttkbootstrap as ttk_style
-from ttkbootstrap.constants import *
 import threading
 import time
 import os
@@ -21,11 +21,16 @@ from src.config_manager import ConfigManager
 from src.global_shortcuts import GlobalShortcuts
 from src.waveform_visualizer import WaveformVisualizer
 
+# Set appearance mode and default color theme
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-class SettingsDialog:
+
+class SettingsDialog(ctk.CTkToplevel):
     """Settings configuration dialog for WhisperTux"""
 
     def __init__(self, parent, config, global_shortcuts, update_callback, text_injector=None, app_instance=None):
+        super().__init__(parent)
         self.parent = parent
         self.config = config
         self.global_shortcuts = global_shortcuts
@@ -33,509 +38,364 @@ class SettingsDialog:
         self.text_injector = text_injector
         self.app_instance = app_instance
 
-        # Dialog window
-        self.dialog = None
-        self.shortcut_var = None
-        self.shortcut_combo = None
-        self.test_button = None
-        self.apply_button = None
-        self.current_shortcut_label = None
-        self.audio_device_options = []
-        self.audio_device_values = []
+        self.title("WhisperTux Settings")
+        self.geometry("550x800")
+        self.resizable(True, True)
+        self.minsize(500, 600)
 
-        self._create_dialog()
+        # Make modal
+        self.transient(parent)
+        self.grab_set()
 
-    def _create_dialog(self):
-        """Create the settings dialog window"""
-        self.dialog = tk.Toplevel(self.parent)
-        self.dialog.title("WhisperTux Settings")
-        self.dialog.geometry("520x600")
-        self.dialog.resizable(True, True)
-        self.dialog.minsize(520, 400)
-        self.dialog.transient(self.parent)
-        self.dialog.grab_set()
-
-        # Center the dialog on parent window
+        # Center the dialog
         self._center_dialog()
 
-        # Create scrollable container
-        self._create_scrollable_dialog_frame()
+        # Variables
+        self.shortcut_var = ctk.StringVar(value=self.config.get_setting('primary_shortcut', 'F12'))
+        self.model_var = ctk.StringVar(value=self.config.get_setting('model', 'base'))
+        self.always_on_top_var = ctk.BooleanVar(value=self.config.get_setting('always_on_top', True))
+        self.use_clipboard_var = ctk.BooleanVar(value=self.config.get_setting('use_clipboard', False))
+        self.key_delay_var = ctk.StringVar(value=str(self.config.get_setting('key_delay', 15)))
+        self.audio_device_var = ctk.StringVar()
+        self.keyboard_device_var = ctk.StringVar()
 
+        self.audio_device_options = []
+        self.audio_device_values = []
+        self.keyboard_options = []
+        self.keyboard_values = []
 
-        # Global Shortcuts Section
-        self._create_shortcuts_section(self.scrollable_dialog_frame)
+        # Create scrollable frame
+        self.scrollable_frame = ctk.CTkScrollableFrame(self, label_text="")
+        self.scrollable_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Model Settings Section
-        self._create_model_section(self.scrollable_dialog_frame)
-
-        # Additional Settings Section
-        self._create_general_section(self.scrollable_dialog_frame)
-
-        # Word Overrides Section
-        self._create_word_overrides_section(self.scrollable_dialog_frame)
-
-        # Buttons
-        self._create_buttons(self.scrollable_dialog_frame)
-
-    def _create_scrollable_dialog_frame(self):
-        """Create a scrollable frame for the settings dialog"""
-        # Create canvas and scrollbar
-        self.dialog_canvas = tk.Canvas(self.dialog, highlightthickness=0)
-        self.dialog_scrollbar = ttk.Scrollbar(self.dialog, orient="vertical", command=self.dialog_canvas.yview)
-        self.scrollable_dialog_frame = ttk.Frame(self.dialog_canvas)
-
-        # Configure scrolling
-        self.scrollable_dialog_frame.bind(
-            "<Configure>",
-            lambda e: self.dialog_canvas.configure(scrollregion=self.dialog_canvas.bbox("all"))
-        )
-
-        # Create window in canvas
-        self.dialog_canvas_window = self.dialog_canvas.create_window((0, 0), window=self.scrollable_dialog_frame, anchor="nw")
-        self.dialog_canvas.configure(yscrollcommand=self.dialog_scrollbar.set)
-
-        # Bind canvas resize to update scroll region
-        def on_dialog_canvas_configure(event):
-            self.dialog_canvas.itemconfig(self.dialog_canvas_window, width=event.width)
-        self.dialog_canvas.bind('<Configure>', on_dialog_canvas_configure)
-
-        # Bind mousewheel to scroll
-        def on_dialog_mousewheel(event):
-            self.dialog_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        def bind_dialog_mousewheel(event):
-            self.dialog_canvas.bind_all("<MouseWheel>", on_dialog_mousewheel)
-
-        def unbind_dialog_mousewheel(event):
-            self.dialog_canvas.unbind_all("<MouseWheel>")
-
-        self.dialog_canvas.bind('<Enter>', bind_dialog_mousewheel)
-        self.dialog_canvas.bind('<Leave>', unbind_dialog_mousewheel)
-
-        # Pack canvas and scrollbar with proper spacing
-        self.dialog_canvas.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=20)
-        self.dialog_scrollbar.pack(side="right", fill="y", padx=(10, 20), pady=20)
+        # Create sections
+        self._create_shortcuts_section()
+        self._create_model_section()
+        self._create_model_directories_section()
+        self._create_general_section()
+        self._create_word_overrides_section()
+        self._create_buttons()
 
     def _center_dialog(self):
         """Center the dialog on the parent window"""
-        self.dialog.update_idletasks()
-
+        self.update_idletasks()
         parent_x = self.parent.winfo_rootx()
         parent_y = self.parent.winfo_rooty()
         parent_width = self.parent.winfo_width()
         parent_height = self.parent.winfo_height()
-
-        dialog_width = self.dialog.winfo_reqwidth()
-        dialog_height = self.dialog.winfo_reqheight()
-
+        dialog_width = 550
+        dialog_height = 800
         x = parent_x + (parent_width - dialog_width) // 2
         y = parent_y + (parent_height - dialog_height) // 2
+        self.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
 
-        self.dialog.geometry(f"+{x}+{y}")
-
-    def _create_shortcuts_section(self, parent):
+    def _create_shortcuts_section(self):
         """Create the global shortcuts configuration section"""
-        shortcuts_frame = ttk.LabelFrame(parent, text="Global Shortcuts", padding=15)
-        shortcuts_frame.pack(fill=X, pady=(0, 15))
+        frame = ctk.CTkFrame(self.scrollable_frame)
+        frame.pack(fill="x", pady=(0, 15))
 
-        # Instructions
-        info_label = ttk.Label(
-            shortcuts_frame,
-            text="Select a global shortcut key for voice recording:",
-            font=("Arial", 10),
-            bootstyle=INFO
-        )
-        info_label.pack(anchor=W, pady=(0, 10))
+        ctk.CTkLabel(frame, text="Global Shortcuts", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=(15, 10))
+
+        ctk.CTkLabel(frame, text="Select a global shortcut key for voice recording:", text_color="gray").pack(anchor="w", padx=15)
 
         # Current shortcut display
-        current_frame = ttk.Frame(shortcuts_frame)
-        current_frame.pack(fill=X, pady=(0, 10))
+        current_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        current_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(current_frame, text="Current Shortcut:").pack(side="left")
+        self.current_shortcut_label = ctk.CTkLabel(current_frame, text=self.config.get_setting('primary_shortcut', 'F12'), font=ctk.CTkFont(weight="bold"), text_color="#3B8ED0")
+        self.current_shortcut_label.pack(side="right")
 
-        ttk.Label(current_frame, text="Current Shortcut:").pack(side=LEFT)
-        self.current_shortcut_label = ttk.Label(
-            current_frame,
-            text=self.config.get_setting('primary_shortcut', 'F12'),
-            font=("Arial", 10, "bold"),
-            bootstyle=SUCCESS
-        )
-        self.current_shortcut_label.pack(side=RIGHT)
+        # Shortcut selection
+        selection_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        selection_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(selection_frame, text="New Shortcut:").pack(side="left")
 
-        # New shortcut selection
-        selection_frame = ttk.Frame(shortcuts_frame)
-        selection_frame.pack(fill=X, pady=(0, 10))
+        shortcut_options = self._get_shortcut_options()
+        self.shortcut_combo = ctk.CTkComboBox(selection_frame, variable=self.shortcut_var, values=shortcut_options, width=180)
+        self.shortcut_combo.pack(side="right")
 
-        ttk.Label(selection_frame, text="New Shortcut:").pack(side=LEFT)
+        # Test button
+        test_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        test_frame.pack(fill="x", padx=15, pady=(10, 15))
+        self.test_button = ctk.CTkButton(test_frame, text="Test Shortcut", command=self._test_shortcut, width=120)
+        self.test_button.pack(side="left")
+        self.test_status_label = ctk.CTkLabel(test_frame, text="", text_color="gray")
+        self.test_status_label.pack(side="right")
 
-        # Available shortcut options
-        shortcut_options = [
-            'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
-            'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-            'Ctrl+X',
-            'Ctrl+F1', 'Ctrl+F2', 'Ctrl+F3', 'Ctrl+F4',
-            'Ctrl+F5', 'Ctrl+F6', 'Ctrl+F7', 'Ctrl+F8',
-            'Ctrl+F9', 'Ctrl+F10', 'Ctrl+F11', 'Ctrl+F12',
-            'Alt+F1', 'Alt+F2', 'Alt+F3', 'Alt+F4',
-            'Alt+F5', 'Alt+F6', 'Alt+F7', 'Alt+F8',
-            'Alt+F9', 'Alt+F10', 'Alt+F11', 'Alt+F12',
-            'Shift+F1', 'Shift+F2', 'Shift+F3', 'Shift+F4',
-            'Shift+F5', 'Shift+F6', 'Shift+F7', 'Shift+F8',
-            'Shift+F9', 'Shift+F10', 'Shift+F11', 'Shift+F12',
-            'Super+F1', 'Super+F2', 'Super+F3', 'Super+F4',
-            'Super+F5', 'Super+F6', 'Super+F7', 'Super+F8',
-            'Super+F9', 'Super+F10', 'Super+F11', 'Super+F12',
-            'Super+X'
-        ]
+    def _get_shortcut_options(self):
+        """Get available shortcut options"""
+        options = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12']
+        for prefix in ['Ctrl+', 'Alt+', 'Shift+', 'Super+']:
+            for fkey in ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12']:
+                options.append(f'{prefix}{fkey}')
+        for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+            options.append(f'Ctrl+{letter}')
+            options.append(f'Ctrl+Shift+{letter}')
+            options.append(f'Super+{letter}')
+        return options
 
-        # Add Ctrl + letter combinations
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            shortcut_options.append(f'Ctrl+{letter.upper()}')
-
-        # Add Ctrl + Shift + letter combinations
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            shortcut_options.append(f'Ctrl+Shift+{letter.upper()}')
-
-        # Add Super + letter combinations
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            shortcut_options.append(f'Super+{letter.upper()}')
-
-        # Add Ctrl + Super + letter combinations
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            shortcut_options.append(f'Ctrl+Super+{letter.upper()}')
-
-        # Add Super + Alt + letter combinations
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            shortcut_options.append(f'Super+Alt+{letter.upper()}')
-
-        # Add Ctrl + Alt + letter combinations
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            shortcut_options.append(f'Ctrl+Alt+{letter.upper()}')
-
-        self.shortcut_var = tk.StringVar(value=self.config.get_setting('primary_shortcut', 'F12'))
-        self.shortcut_combo = ttk.Combobox(
-            selection_frame,
-            textvariable=self.shortcut_var,
-            values=shortcut_options,
-            state="readonly",
-            width=15
-        )
-        self.shortcut_combo.pack(side=RIGHT)
-
-        # Test shortcut button
-        test_frame = ttk.Frame(shortcuts_frame)
-        test_frame.pack(fill=X, pady=(10, 0))
-
-        self.test_button = ttk.Button(
-            test_frame,
-            text="Test Shortcut",
-            command=self._test_shortcut,
-            bootstyle=INFO,
-            width=15
-        )
-        self.test_button.pack(side=LEFT)
-
-        # Status label for test results
-        self.test_status_label = ttk.Label(
-            test_frame,
-            text="",
-            font=("Arial", 9),
-        )
-        self.test_status_label.pack(side=RIGHT, padx=(10, 0))
-
-    def _create_model_section(self, parent):
+    def _create_model_section(self):
         """Create the model configuration section"""
-        model_frame = ttk.LabelFrame(parent, text="Model", padding=15)
-        model_frame.pack(fill=X, pady=(0, 15))
+        frame = ctk.CTkFrame(self.scrollable_frame)
+        frame.pack(fill="x", pady=(0, 15))
 
-        # Model selection
-        model_selection_frame = ttk.Frame(model_frame)
-        model_selection_frame.pack(fill=X, pady=(0, 10))
+        ctk.CTkLabel(frame, text="Model", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=(15, 10))
 
-        ttk.Label(model_selection_frame, text="Whisper Model:").pack(side=LEFT)
+        model_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        model_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(model_frame, text="Whisper Model:").pack(side="left")
 
-        # Get available models from whisper manager
         try:
-            # Access the whisper manager through the app instance
             available_models = []
             if self.app_instance and hasattr(self.app_instance, 'whisper_manager'):
                 available_models = self.app_instance.whisper_manager.get_available_models()
             if not available_models:
                 available_models = ["No models found"]
-        except Exception as e:
-            print(f"Error getting models: {e}")
+        except Exception:
             available_models = ["No models found"]
 
-        self.model_var = tk.StringVar(value=self.config.get_setting('model', 'base'))
-        self.model_combo_dialog = ttk.Combobox(
-            model_selection_frame,
-            textvariable=self.model_var,
-            values=available_models,
-            state="readonly",
-            width=35  # Wider to accommodate finetune names
-        )
-        self.model_combo_dialog.pack(side=RIGHT)
-
-        # Set current model if it exists
         current_model = self.config.get_setting('model', 'base')
         if current_model in available_models:
             self.model_var.set(current_model)
         elif available_models and available_models[0] != "No models found":
             self.model_var.set(available_models[0])
 
-        # Download Models button
-        download_frame = ttk.Frame(model_frame)
-        download_frame.pack(fill=X, pady=(10, 0))
+        self.model_combo_dialog = ctk.CTkComboBox(model_frame, variable=self.model_var, values=available_models, width=250)
+        self.model_combo_dialog.pack(side="right")
 
-        download_button = ttk.Button(
-            download_frame,
-            text="Download Models",
-            command=self._show_model_download_from_settings,
-            bootstyle=INFO,
-            width=15
-        )
-        download_button.pack(side=RIGHT)
+        # Download button
+        download_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        download_frame.pack(fill="x", padx=15, pady=(5, 15))
+        ctk.CTkButton(download_frame, text="Download Models", command=self._show_model_download_from_settings, width=140).pack(side="right")
 
-    def _create_general_section(self, parent):
+    def _create_model_directories_section(self):
+        """Create the model directories configuration section"""
+        frame = ctk.CTkFrame(self.scrollable_frame)
+        frame.pack(fill="x", pady=(0, 15))
+
+        ctk.CTkLabel(frame, text="Model Directories", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=(15, 10))
+        ctk.CTkLabel(frame, text="Configure directories to scan for Whisper models:", text_color="gray").pack(anchor="w", padx=15)
+
+        # Directory listbox (using tkinter Listbox within CTk)
+        list_frame = ctk.CTkFrame(frame)
+        list_frame.pack(fill="x", padx=15, pady=10)
+
+        self.dirs_listbox = tk.Listbox(list_frame, height=4, font=("Arial", 10), bg="#2b2b2b", fg="#ffffff", selectbackground="#1f538d", highlightthickness=0, bd=0)
+        scrollbar = ctk.CTkScrollbar(list_frame, command=self.dirs_listbox.yview)
+        self.dirs_listbox.configure(yscrollcommand=scrollbar.set)
+        self.dirs_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self._refresh_directories_list()
+
+        # Add directory
+        add_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        add_frame.pack(fill="x", padx=15, pady=5)
+        self.new_dir_entry = ctk.CTkEntry(add_frame, placeholder_text="Enter directory path...", width=300)
+        self.new_dir_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkButton(add_frame, text="Browse", command=self._browse_directory, width=80).pack(side="right")
+
+        # Buttons
+        buttons_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        buttons_frame.pack(fill="x", padx=15, pady=(5, 15))
+        ctk.CTkButton(buttons_frame, text="Add", command=self._add_model_directory, width=80, fg_color="#2d7d46", hover_color="#236b38").pack(side="left")
+        ctk.CTkButton(buttons_frame, text="Remove", command=self._remove_model_directory, width=80, fg_color="#d4652f", hover_color="#b85528").pack(side="left", padx=5)
+        ctk.CTkButton(buttons_frame, text="Refresh Models", command=self._refresh_models_after_dirs_change, width=120).pack(side="right")
+
+    def _create_general_section(self):
         """Create the general settings section"""
-        general_frame = ttk.LabelFrame(parent, text="General Settings", padding=15)
-        general_frame.pack(fill=X, pady=(0, 15))
+        frame = ctk.CTkFrame(self.scrollable_frame)
+        frame.pack(fill="x", pady=(0, 15))
 
-        # Always on top setting
-        always_on_top_frame = ttk.Frame(general_frame)
-        always_on_top_frame.pack(fill=X, pady=(0, 5))
+        ctk.CTkLabel(frame, text="General Settings", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=(15, 10))
 
-        self.always_on_top_var = tk.BooleanVar(value=self.config.get_setting('always_on_top', True))
-        always_on_top_check = ttk.Checkbutton(
-            always_on_top_frame,
-            text="Keep window always on top",
-            variable=self.always_on_top_var,
-            bootstyle="round-toggle"
-        )
-        always_on_top_check.pack(anchor=W)
+        # Always on top
+        ctk.CTkSwitch(frame, text="Keep window always on top", variable=self.always_on_top_var).pack(anchor="w", padx=15, pady=5)
 
-        # Use clipboard option (moved above typing speed)
-        clipboard_frame = ttk.Frame(general_frame)
-        clipboard_frame.pack(fill=X, pady=(5, 5))
+        # Use clipboard
+        ctk.CTkSwitch(frame, text="Use clipboard for text injection", variable=self.use_clipboard_var).pack(anchor="w", padx=15, pady=5)
 
-        self.use_clipboard_var = tk.BooleanVar(value=self.config.get_setting('use_clipboard', False))
-        clipboard_check = ttk.Checkbutton(
-            clipboard_frame,
-            text="Use clipboard for text injection (alternative method)",
-            variable=self.use_clipboard_var,
-            bootstyle="round-toggle"
-        )
-        clipboard_check.pack(anchor=W)
+        # Key delay
+        delay_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        delay_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(delay_frame, text="Key Delay (ms):").pack(side="left")
+        ctk.CTkEntry(delay_frame, textvariable=self.key_delay_var, width=80).pack(side="right")
 
-        # Key delay setting
-        key_delay_frame = ttk.Frame(general_frame)
-        key_delay_frame.pack(fill=X, pady=(5, 5))
+        # Microphone
+        mic_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        mic_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(mic_frame, text="Microphone:").pack(side="left")
 
-        ttk.Label(key_delay_frame, text="Key Delay (ms):").pack(side=LEFT)
-
-        self.key_delay_var = tk.StringVar(value=str(self.config.get_setting('key_delay', 15)))
-        key_delay_entry = ttk.Entry(
-            key_delay_frame,
-            textvariable=self.key_delay_var,
-            width=10
-        )
-        key_delay_entry.pack(side=RIGHT)
-
-        # Microphone device selection
-        microphone_frame = ttk.Frame(general_frame)
-        microphone_frame.pack(fill=X, pady=(5, 5))
-
-        ttk.Label(microphone_frame, text="Microphone:").pack(side=LEFT)
-
-        # Discover available microphones
         try:
             available_mics = AudioCapture.get_available_input_devices()
             mic_options = ["System Default"]
             mic_values = [None]
-
             for device in available_mics:
                 mic_options.append(device['display_name'])
                 mic_values.append(device['id'])
-
-            if not available_mics:
-                mic_options.append("No input devices found")
-                mic_values.append(None)
-        except Exception as e:
-            print(f"Error getting microphone devices: {e}")
+        except Exception:
             mic_options = ["System Default"]
             mic_values = [None]
 
         self.audio_device_options = mic_options
         self.audio_device_values = mic_values
 
-        # Find current selection
         current_audio_device = self.config.get_setting('audio_device', None)
         current_audio_index = 0
         if current_audio_device in mic_values:
             current_audio_index = mic_values.index(current_audio_device)
+        self.audio_device_var.set(mic_options[current_audio_index])
 
-        self.audio_device_var = tk.StringVar(value=mic_options[current_audio_index])
-        mic_combo_state = "readonly" if len(mic_options) > 1 else "disabled"
-        microphone_combo = ttk.Combobox(
-            microphone_frame,
-            textvariable=self.audio_device_var,
-            values=mic_options,
-            state=mic_combo_state,
-            width=35
-        )
-        microphone_combo.pack(side=RIGHT)
+        self.mic_combo = ctk.CTkComboBox(mic_frame, variable=self.audio_device_var, values=mic_options, width=250)
+        self.mic_combo.pack(side="right")
 
-        # Keyboard device selection
-        keyboard_frame = ttk.Frame(general_frame)
-        keyboard_frame.pack(fill=X, pady=(5, 0))
+        # Keyboard device
+        kb_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        kb_frame.pack(fill="x", padx=15, pady=(5, 15))
+        ctk.CTkLabel(kb_frame, text="Keyboard Device:").pack(side="left")
 
-        ttk.Label(keyboard_frame, text="Keyboard Device:").pack(side=LEFT)
-
-        # Get available keyboards
         try:
             from src.global_shortcuts import get_available_keyboards
             available_keyboards = get_available_keyboards()
-
             keyboard_options = ["Auto-detect (All Keyboards)"]
             keyboard_values = [""]
-
             for kb in available_keyboards:
                 keyboard_options.append(kb['display_name'])
                 keyboard_values.append(kb['path'])
-
-            self.keyboard_options = keyboard_options
-            self.keyboard_values = keyboard_values
-
-        except Exception as e:
-            print(f"Error getting keyboard devices: {e}")
+        except Exception:
             keyboard_options = ["Auto-detect (All Keyboards)"]
             keyboard_values = [""]
-            self.keyboard_options = keyboard_options
-            self.keyboard_values = keyboard_values
 
-        # Find current selection
+        self.keyboard_options = keyboard_options
+        self.keyboard_values = keyboard_values
+
         current_device = self.config.get_setting('keyboard_device', '')
         current_index = 0
         if current_device in keyboard_values:
             current_index = keyboard_values.index(current_device)
+        self.keyboard_device_var.set(keyboard_options[current_index])
 
-        self.keyboard_device_var = tk.StringVar(value=keyboard_options[current_index])
-        keyboard_combo = ttk.Combobox(
-            keyboard_frame,
-            textvariable=self.keyboard_device_var,
-            values=keyboard_options,
-            state="readonly",
-            width=35
-        )
-        keyboard_combo.pack(side=RIGHT)
+        self.kb_combo = ctk.CTkComboBox(kb_frame, variable=self.keyboard_device_var, values=keyboard_options, width=250)
+        self.kb_combo.pack(side="right")
 
-    def _create_word_overrides_section(self, parent):
+    def _create_word_overrides_section(self):
         """Create the word overrides configuration section"""
-        overrides_frame = ttk.LabelFrame(parent, text="Word Overrides", padding=15)
-        overrides_frame.pack(fill=X, pady=(0, 15))
+        frame = ctk.CTkFrame(self.scrollable_frame)
+        frame.pack(fill="x", pady=(0, 15))
 
-        # Instructions
-        info_label = ttk.Label(
-            overrides_frame,
-            text="Configure word replacements (e.g., 'tech' → 'tek'):",
-            font=("Arial", 10),
-            bootstyle=INFO
-        )
-        info_label.pack(anchor=W, pady=(0, 10))
+        ctk.CTkLabel(frame, text="Word Overrides", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=(15, 10))
+        ctk.CTkLabel(frame, text="Configure word replacements (e.g., 'tech' -> 'tek'):", text_color="gray").pack(anchor="w", padx=15)
 
-        # Current overrides list
-        list_frame = ttk.Frame(overrides_frame)
-        list_frame.pack(fill=X, pady=(0, 10))
+        # Overrides list using Treeview
+        list_frame = ctk.CTkFrame(frame)
+        list_frame.pack(fill="x", padx=15, pady=10)
 
-        # Create treeview for overrides list
         columns = ('original', 'replacement')
-        self.overrides_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=4)
+        self.overrides_tree = tk.ttk.Treeview(list_frame, columns=columns, show='headings', height=4)
         self.overrides_tree.heading('original', text='Original')
         self.overrides_tree.heading('replacement', text='Replacement')
-        self.overrides_tree.column('original', width=120)
-        self.overrides_tree.column('replacement', width=120)
+        self.overrides_tree.column('original', width=150)
+        self.overrides_tree.column('replacement', width=150)
 
-        # Scrollbar for treeview
-        tree_scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=self.overrides_tree.yview)
+        # Style the treeview for dark mode
+        style = tk.ttk.Style()
+        style.theme_use('clam')
+        style.configure("Treeview", background="#2b2b2b", foreground="white", fieldbackground="#2b2b2b", rowheight=25)
+        style.configure("Treeview.Heading", background="#3b3b3b", foreground="white")
+        style.map('Treeview', background=[('selected', '#1f538d')])
+
+        tree_scrollbar = ctk.CTkScrollbar(list_frame, command=self.overrides_tree.yview)
         self.overrides_tree.configure(yscrollcommand=tree_scrollbar.set)
+        self.overrides_tree.pack(side="left", fill="both", expand=True)
+        tree_scrollbar.pack(side="right", fill="y")
 
-        self.overrides_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        tree_scrollbar.pack(side=RIGHT, fill=Y)
-
-        # Load current overrides
         self._refresh_overrides_list()
 
-        # Add new override section
-        add_frame = ttk.Frame(overrides_frame)
-        add_frame.pack(fill=X, pady=(10, 10))
+        # Add override inputs
+        input_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        input_frame.pack(fill="x", padx=15, pady=5)
+        ctk.CTkLabel(input_frame, text="Original:").pack(side="left")
+        self.original_entry = ctk.CTkEntry(input_frame, width=120)
+        self.original_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(input_frame, text="->").pack(side="left")
+        ctk.CTkLabel(input_frame, text="Replacement:").pack(side="left", padx=(5, 0))
+        self.replacement_entry = ctk.CTkEntry(input_frame, width=120)
+        self.replacement_entry.pack(side="left", padx=5)
 
-        # Entry fields for new override
-        ttk.Label(add_frame, text="Add Override:", font=("Arial", 9, "bold")).pack(anchor=W)
+        # Buttons
+        buttons_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        buttons_frame.pack(fill="x", padx=15, pady=(5, 15))
+        ctk.CTkButton(buttons_frame, text="Add", command=self._add_word_override, width=70, fg_color="#2d7d46", hover_color="#236b38").pack(side="left")
+        ctk.CTkButton(buttons_frame, text="Edit", command=self._edit_word_override, width=70).pack(side="left", padx=5)
+        ctk.CTkButton(buttons_frame, text="Delete", command=self._delete_word_override, width=70, fg_color="#d4652f", hover_color="#b85528").pack(side="left")
+        ctk.CTkButton(buttons_frame, text="Clear All", command=self._clear_all_overrides, width=80, fg_color="#c42b1c", hover_color="#a52714").pack(side="right")
 
-        input_frame = ttk.Frame(add_frame)
-        input_frame.pack(fill=X, pady=(5, 0))
-
-        ttk.Label(input_frame, text="Original:").pack(side=LEFT)
-        self.original_entry = ttk.Entry(input_frame, width=15)
-        self.original_entry.pack(side=LEFT, padx=(5, 10))
-
-        ttk.Label(input_frame, text="→").pack(side=LEFT)
-
-        ttk.Label(input_frame, text="Replacement:").pack(side=LEFT, padx=(10, 5))
-        self.replacement_entry = ttk.Entry(input_frame, width=15)
-        self.replacement_entry.pack(side=LEFT, padx=(5, 10))
-
-        # Buttons for managing overrides
-        buttons_frame = ttk.Frame(overrides_frame)
-        buttons_frame.pack(fill=X, pady=(10, 0))
-
-        add_button = ttk.Button(
-            buttons_frame,
-            text="Add",
-            command=self._add_word_override,
-            bootstyle=SUCCESS,
-            width=8
-        )
-        add_button.pack(side=LEFT)
-
-        edit_button = ttk.Button(
-            buttons_frame,
-            text="Edit",
-            command=self._edit_word_override,
-            bootstyle=INFO,
-            width=8
-        )
-        edit_button.pack(side=LEFT, padx=(5, 0))
-
-        delete_button = ttk.Button(
-            buttons_frame,
-            text="Delete",
-            command=self._delete_word_override,
-            bootstyle=WARNING,
-            width=8
-        )
-        delete_button.pack(side=LEFT, padx=(5, 0))
-
-        clear_all_button = ttk.Button(
-            buttons_frame,
-            text="Clear All",
-            command=self._clear_all_overrides,
-            bootstyle=DANGER,
-            width=8
-        )
-        clear_all_button.pack(side=RIGHT)
-
-        # Bind double-click to edit
         self.overrides_tree.bind('<Double-1>', lambda e: self._edit_word_override())
+
+    def _create_buttons(self):
+        """Create dialog action buttons"""
+        button_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
+        button_frame.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkButton(button_frame, text="Cancel", command=self.destroy, width=100, fg_color="#4a4a4a", hover_color="#3a3a3a").pack(side="left")
+        ctk.CTkButton(button_frame, text="Reset to Defaults", command=self._reset_defaults, width=130, fg_color="#d4652f", hover_color="#b85528").pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text="Save Settings", command=self._save_settings, width=120, fg_color="#2d7d46", hover_color="#236b38").pack(side="right")
+
+    def _refresh_directories_list(self):
+        """Refresh the model directories list display"""
+        self.dirs_listbox.delete(0, tk.END)
+        directories = self.config.get_model_directories()
+        for directory in directories:
+            self.dirs_listbox.insert(tk.END, directory)
+
+    def _browse_directory(self):
+        """Open file dialog to browse for a directory"""
+        from tkinter import filedialog
+        directory = filedialog.askdirectory(title="Select Model Directory", initialdir=str(Path.home()))
+        if directory:
+            self.new_dir_entry.delete(0, tk.END)
+            self.new_dir_entry.insert(0, directory)
+
+    def _add_model_directory(self):
+        """Add a new model directory"""
+        new_dir = self.new_dir_entry.get().strip()
+        if not new_dir:
+            messagebox.showwarning("Invalid Input", "Please enter a directory path.")
+            return
+
+        expanded_path = Path(new_dir).expanduser()
+        if not expanded_path.exists():
+            if not messagebox.askyesno("Directory Not Found", f"Directory '{new_dir}' does not exist. Add it anyway?"):
+                return
+
+        if self.config.add_model_directory(new_dir):
+            self._refresh_directories_list()
+            self.new_dir_entry.delete(0, tk.END)
+        else:
+            messagebox.showinfo("Already Added", "This directory is already in the list.")
+
+    def _remove_model_directory(self):
+        """Remove the selected model directory"""
+        selection = self.dirs_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a directory to remove.")
+            return
+
+        selected_dir = self.dirs_listbox.get(selection[0])
+        if self.config.remove_model_directory(selected_dir):
+            self._refresh_directories_list()
+
+    def _refresh_models_after_dirs_change(self):
+        """Refresh the model list after directory changes"""
+        self.config.save_config()
+        self._refresh_model_combo_dialog()
+        messagebox.showinfo("Models Refreshed", "Model list has been refreshed with the current directories.")
 
     def _refresh_overrides_list(self):
         """Refresh the word overrides list display"""
-        # Clear current items
         for item in self.overrides_tree.get_children():
             self.overrides_tree.delete(item)
-
-        # Load overrides from config
         word_overrides = self.config.get_word_overrides()
-
-        # Add items to tree
         for original, replacement in word_overrides.items():
             self.overrides_tree.insert('', 'end', values=(original, replacement))
 
@@ -543,16 +403,11 @@ class SettingsDialog:
         """Add a new word override"""
         original = self.original_entry.get().strip()
         replacement = self.replacement_entry.get().strip()
-
         if not original or not replacement:
             messagebox.showwarning("Invalid Input", "Both original and replacement words are required.")
             return
-
-        # Add/update override
         self.config.add_word_override(original, replacement)
         self._refresh_overrides_list()
-
-        # Clear entry fields
         self.original_entry.delete(0, tk.END)
         self.replacement_entry.delete(0, tk.END)
 
@@ -561,19 +416,13 @@ class SettingsDialog:
         selection = self.overrides_tree.selection()
         if not selection:
             return
-
-        # Get selected item values
         item = selection[0]
         values = self.overrides_tree.item(item, 'values')
         original, replacement = values
-
-        # Populate entry fields with current values
         self.original_entry.delete(0, tk.END)
         self.original_entry.insert(0, original)
         self.replacement_entry.delete(0, tk.END)
         self.replacement_entry.insert(0, replacement)
-
-        # Remove the old override (we'll add the new one when user clicks Add)
         self.config.remove_word_override(original)
         self._refresh_overrides_list()
 
@@ -582,12 +431,9 @@ class SettingsDialog:
         selection = self.overrides_tree.selection()
         if not selection:
             return
-
-        # Get selected item values
         item = selection[0]
         values = self.overrides_tree.item(item, 'values')
         original = values[0]
-
         self.config.remove_word_override(original)
         self._refresh_overrides_list()
 
@@ -596,122 +442,58 @@ class SettingsDialog:
         self.config.clear_word_overrides()
         self._refresh_overrides_list()
 
-    def _create_buttons(self, parent):
-        """Create dialog action buttons"""
-        button_frame = ttk.Frame(parent)
-        button_frame.pack(fill=X, pady=(20, 0))
-
-        # Cancel button
-        cancel_button = ttk.Button(
-            button_frame,
-            text="✖️ Cancel",
-            command=self._cancel,
-            bootstyle=SECONDARY,
-            width=12
-        )
-        cancel_button.pack(side=LEFT)
-
-        # Reset to defaults button
-        reset_button = ttk.Button(
-            button_frame,
-            text="Reset to Defaults",
-            command=self._reset_defaults,
-            bootstyle=WARNING,
-            width=15
-        )
-        reset_button.pack(side=LEFT, padx=(10, 0))
-
-        # Save Settings button
-        self.save_button = ttk.Button(
-            button_frame,
-            text="Save Settings",
-            command=self._save_settings,
-            bootstyle=SUCCESS,
-            width=15
-        )
-        self.save_button.pack(side=RIGHT)
-
     def _test_shortcut(self):
         """Test the selected shortcut"""
         selected_shortcut = self.shortcut_var.get()
-
         if not selected_shortcut:
-            self.test_status_label.config(text="ERROR: No shortcut selected", bootstyle=DANGER)
+            self.test_status_label.configure(text="No shortcut selected", text_color="#c42b1c")
             return
 
-        self.test_status_label.config(text="🔄 Testing...", bootstyle=WARNING)
-        self.test_button.config(state=DISABLED)
-        self.dialog.update()
+        self.test_status_label.configure(text="Testing...", text_color="#d4652f")
+        self.test_button.configure(state="disabled")
 
         def test_shortcut_thread():
             try:
-                # Create a temporary global shortcuts instance for testing
                 test_triggered = threading.Event()
 
                 def test_callback():
                     test_triggered.set()
 
-                # Create test shortcuts instance
                 from src.global_shortcuts import GlobalShortcuts
                 test_shortcuts = GlobalShortcuts(selected_shortcut, test_callback)
 
                 if test_shortcuts.start():
-                    # Wait for test trigger
-                    self.dialog.after(100, lambda: self.test_status_label.config(
-                        text=f"Press {selected_shortcut} within 5 seconds...",
-                        bootstyle=INFO
-                    ))
+                    self.after(100, lambda: self.test_status_label.configure(text=f"Press {selected_shortcut} within 5s...", text_color="#3B8ED0"))
 
                     if test_triggered.wait(timeout=5):
-                        self.dialog.after(100, lambda: self.test_status_label.config(
-                            text="✅ Test successful!",
-                            bootstyle=SUCCESS
-                        ))
-                        result = True
+                        self.after(100, lambda: self.test_status_label.configure(text="Test successful!", text_color="#2d7d46"))
                     else:
-                        self.dialog.after(100, lambda: self.test_status_label.config(
-                            text="❌ Test failed - no response",
-                            bootstyle=DANGER
-                        ))
-                        result = False
+                        self.after(100, lambda: self.test_status_label.configure(text="No response", text_color="#c42b1c"))
 
                     test_shortcuts.stop()
                 else:
-                    self.dialog.after(100, lambda: self.test_status_label.config(
-                        text="❌ Could not start test",
-                        bootstyle=DANGER
-                    ))
-                    result = False
-
+                    self.after(100, lambda: self.test_status_label.configure(text="Could not start test", text_color="#c42b1c"))
             except Exception as e:
-                self.dialog.after(100, lambda: self.test_status_label.config(
-                    text=f"❌ Test error: {str(e)[:20]}...",
-                    bootstyle=DANGER
-                ))
+                self.after(100, lambda: self.test_status_label.configure(text=f"Error: {str(e)[:20]}", text_color="#c42b1c"))
             finally:
-                self.dialog.after(100, lambda: self.test_button.config(state=NORMAL))
+                self.after(100, lambda: self.test_button.configure(state="normal"))
 
-        # Run test in background thread
-        test_thread = threading.Thread(target=test_shortcut_thread, daemon=True)
-        test_thread.start()
+        threading.Thread(target=test_shortcut_thread, daemon=True).start()
 
     def _save_settings(self):
         """Save all settings and apply them"""
         try:
-            # Get current values from dialog
             new_shortcut = self.shortcut_var.get()
             old_shortcut = self.config.get_setting('primary_shortcut')
 
-            # Get keyboard device selection
             selected_keyboard_index = self.keyboard_options.index(self.keyboard_device_var.get())
             selected_keyboard_path = self.keyboard_values[selected_keyboard_index]
-            # Get microphone selection
+
             try:
                 selected_audio_index = self.audio_device_options.index(self.audio_device_var.get())
             except ValueError:
                 selected_audio_index = 0
 
-            # Validate and update key delay setting
             key_delay_str = self.key_delay_var.get().strip()
             try:
                 key_delay_value = int(key_delay_str)
@@ -723,219 +505,106 @@ class SettingsDialog:
                 messagebox.showwarning("Invalid Input", "Key delay must be a valid number.")
                 return
 
-            # Update all settings in config
             self.config.set_setting('primary_shortcut', new_shortcut)
             self.config.set_setting('always_on_top', self.always_on_top_var.get())
             self.config.set_setting('use_clipboard', self.use_clipboard_var.get())
             self.config.set_setting('keyboard_device', selected_keyboard_path)
             self.config.set_setting('audio_device', self.audio_device_values[selected_audio_index])
 
-            # Update model setting if changed
             new_model = self.model_var.get()
             if new_model != "No models found":
                 self.config.set_setting('model', new_model)
-                # Update the parent's whisper manager
                 if hasattr(self.parent, 'whisper_manager'):
                     try:
                         self.parent.whisper_manager.set_model(new_model)
                     except Exception as e:
                         print(f"Failed to update model: {e}")
 
-            # Save configuration to file
             if not self.config.save_config():
                 messagebox.showerror("Error", "Failed to save settings to file!")
                 return
 
-            # Apply audio device change immediately
             selected_audio_device = self.audio_device_values[selected_audio_index]
             if self.app_instance and hasattr(self.app_instance, 'audio_capture'):
                 set_result = self.app_instance.audio_capture.set_device(selected_audio_device)
                 if not set_result and selected_audio_device is not None:
-                    messagebox.showwarning(
-                        "Audio Device",
-                        "Selected microphone could not be activated. Using previous device."
-                    )
+                    messagebox.showwarning("Audio Device", "Selected microphone could not be activated. Using previous device.")
 
-            # Update parent window's always on top setting
             self.parent.attributes('-topmost', self.always_on_top_var.get())
 
-            # Handle shortcut changes
-            shortcut_update_success = True
             if new_shortcut != old_shortcut:
                 if self.global_shortcuts:
-                    print(f"Updating global shortcut from {old_shortcut} to {new_shortcut}")
-                    # Stop the current shortcuts listener
                     self.global_shortcuts.stop()
-
-                    # Update the shortcut key
                     self.global_shortcuts.update_shortcut(new_shortcut)
-
-                    # Start the listener with the new shortcut
                     if not self.global_shortcuts.start():
-                        print("Failed to restart global shortcuts")
-                        messagebox.showwarning("Warning",
-                            f"Settings saved successfully, but failed to activate shortcut '{new_shortcut}'. "
-                            f"The shortcut may not work until application restart.")
-                        shortcut_update_success = False
-                    else:
-                        print(f"Successfully activated new shortcut: {new_shortcut}")
-                        shortcut_update_success = True
+                        messagebox.showwarning("Warning", f"Settings saved, but failed to activate shortcut '{new_shortcut}'.")
 
-            # Update the current shortcut display in the dialog
             if self.current_shortcut_label:
-                self.current_shortcut_label.config(text=new_shortcut)
+                self.current_shortcut_label.configure(text=new_shortcut)
 
-            # Call the update callback to refresh main window display
             if self.update_callback:
                 self.update_callback()
 
-            # Close the dialog (settings saved successfully)
-            self._close_dialog()
+            self.destroy()
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
-            print(f"Settings save error: {e}")
-
-    def _apply_settings(self):
-        """Apply the settings changes"""
-        try:
-            # Update shortcut configuration
-            new_shortcut = self.shortcut_var.get()
-            old_shortcut = self.config.get_setting('primary_shortcut')
-
-            if new_shortcut != old_shortcut:
-                self.config.set_setting('primary_shortcut', new_shortcut)
-
-                # Restart global shortcuts with new key
-                if self.global_shortcuts:
-                    print(f"Updating global shortcut from {old_shortcut} to {new_shortcut}")
-                    self.global_shortcuts.stop()
-                    self.global_shortcuts.update_shortcut(new_shortcut)
-                    if not self.global_shortcuts.start():
-                        print("Failed to restart global shortcuts")
-                        messagebox.showwarning("Warning", f"Failed to activate shortcut '{new_shortcut}'. The shortcut has been saved but may not work until application restart.")
-                    else:
-                        print(f"Successfully activated new shortcut: {new_shortcut}")
-
-            # Update other settings
-            self.config.set_setting('always_on_top', self.always_on_top_var.get())
-            self.config.set_setting('use_clipboard', self.use_clipboard_var.get())
-            try:
-                selected_audio_index = self.audio_device_options.index(self.audio_device_var.get())
-            except ValueError:
-                selected_audio_index = 0
-            self.config.set_setting('audio_device', self.audio_device_values[selected_audio_index])
-
-            # Save configuration
-            if self.config.save_config():
-                # Update parent window's always on top setting
-                self.parent.attributes('-topmost', self.always_on_top_var.get())
-
-                # Update the current shortcut display in the dialog
-                if self.current_shortcut_label and new_shortcut:
-                    self.current_shortcut_label.config(text=new_shortcut)
-
-                # Call the update callback to refresh main window display
-                if self.update_callback:
-                    self.update_callback()
-                    if self.app_instance and hasattr(self.app_instance, 'audio_capture'):
-                        self.app_instance.audio_capture.set_device(self.audio_device_values[selected_audio_index])
-
-                messagebox.showinfo("Settings", "Settings applied successfully!")
-                self._close_dialog()
-            else:
-                messagebox.showerror("Error", "Failed to save settings!")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to apply settings: {e}")
 
     def _reset_defaults(self):
         """Reset settings to defaults"""
         if messagebox.askyesno("Reset Settings", "Are you sure you want to reset all settings to defaults?"):
             try:
-                # Reset config to defaults
                 self.config.reset_to_defaults()
-
-                # Update dialog controls
                 new_shortcut = self.config.get_setting('primary_shortcut')
                 self.shortcut_var.set(new_shortcut)
                 self.always_on_top_var.set(self.config.get_setting('always_on_top'))
                 self.key_delay_var.set(str(self.config.get_setting('key_delay')))
                 self.use_clipboard_var.set(self.config.get_setting('use_clipboard'))
-                if hasattr(self, 'audio_device_var') and self.audio_device_options:
+                if self.audio_device_options:
                     self.audio_device_var.set(self.audio_device_options[0])
-
-                # Update the current shortcut display in the dialog
                 if self.current_shortcut_label:
-                    self.current_shortcut_label.config(text=new_shortcut)
-
-                # Refresh word overrides list (will be empty after reset)
-                if hasattr(self, '_refresh_overrides_list'):
-                    self._refresh_overrides_list()
-
-                # Clear override entry fields
-                if hasattr(self, 'original_entry') and hasattr(self, 'replacement_entry'):
-                    self.original_entry.delete(0, tk.END)
-                    self.replacement_entry.delete(0, tk.END)
-
-                self.test_status_label.config(text="Settings reset to defaults", bootstyle=INFO)
-
+                    self.current_shortcut_label.configure(text=new_shortcut)
+                self._refresh_overrides_list()
+                self.original_entry.delete(0, tk.END)
+                self.replacement_entry.delete(0, tk.END)
+                self.test_status_label.configure(text="Settings reset", text_color="#3B8ED0")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to reset settings: {e}")
 
     def _show_model_download_from_settings(self):
         """Show model download dialog from settings"""
-        # Just delegate to the app instance's method
         if self.app_instance and hasattr(self.app_instance, '_show_model_download'):
-            # Pass a callback to refresh this dialog's model combo after download
             self.app_instance._show_model_download(callback=self._refresh_model_combo_dialog)
 
     def _refresh_model_combo_dialog(self):
         """Refresh the model combo box in this settings dialog"""
         try:
-            # Get updated available models
             available_models = []
             if self.app_instance and hasattr(self.app_instance, 'whisper_manager'):
                 available_models = self.app_instance.whisper_manager.get_available_models()
             if not available_models:
                 available_models = ["No models found"]
 
-            # Update the combo box values
             if hasattr(self, 'model_combo_dialog') and self.model_combo_dialog:
-                self.model_combo_dialog['values'] = available_models
-
-                # Update current selection if needed
+                self.model_combo_dialog.configure(values=available_models)
                 current_model = self.config.get_setting('model', 'base')
                 if current_model in available_models:
                     self.model_var.set(current_model)
                 elif available_models and available_models[0] != "No models found":
                     self.model_var.set(available_models[0])
-
-                print(f"Refreshed settings dialog model combo with: {available_models}")
         except Exception as e:
             print(f"Error refreshing settings dialog model combo: {e}")
 
-    def _cancel(self):
-        """Cancel settings dialog"""
-        self._close_dialog()
-
-    def _close_dialog(self):
-        """Close the settings dialog"""
-        if self.dialog:
-            self.dialog.grab_release()
-            self.dialog.destroy()
 
 class WhisperTuxApp:
     """Main application class for WhisperTux voice dictation"""
 
     def __init__(self):
-        # Initialize core components first
+        # Initialize core components
         self.config = ConfigManager()
 
-        # Initialize audio capture with configured device
         audio_device_id = self.config.get_setting('audio_device', None)
         self.audio_capture = AudioCapture(device_id=audio_device_id)
-
         self.whisper_manager = WhisperManager()
         self.text_injector = TextInjector(self.config)
         self.global_shortcuts = None
@@ -947,40 +616,36 @@ class WhisperTuxApp:
 
         # GUI components
         self.root = None
-        self.main_frame = None
         self.status_label = None
         self.record_button = None
         self.transcription_text = None
         self.waveform_visualizer = None
-        self.model_combo = None
         self.shortcut_display_label = None
         self.audio_device_display_label = None
+        self.model_display_label = None
+        self.key_delay_display_label = None
 
         # Initialize GUI
         self._setup_gui()
         self._setup_global_shortcuts()
 
     def _setup_gui(self):
-        """Initialize the main GUI window with ttkbootstrap styling"""
+        """Initialize the main GUI window with CustomTkinter"""
+        self.root = ctk.CTk()
+        self.root.title("WhisperTux - Voice Dictation")
+        self.root.geometry("480x650")
+        self.root.minsize(450, 550)
 
-        # Create main window with ttkbootstrap
-        self.root = ttk_style.Window(
-            title="WhisperTux - Voice Dictation",
-            themename="darkly",
-            size=(480, 600),
-            resizable=(True, True),
-            minsize=(480, 500)
-        )
-
-        # Configure window properties to match the electron version
-        self.root.attributes('-topmost', True)  # Always on top
+        # Always on top
+        self.root.attributes('-topmost', self.config.get_setting('always_on_top', True))
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
-        # Position window in top-right corner (similar to electron version)
+        # Position window
         self._position_window()
 
-        # Create scrollable main container
-        self._create_scrollable_main_frame()
+        # Main frame
+        self.main_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # Create GUI sections
         self._create_header()
@@ -989,324 +654,167 @@ class WhisperTuxApp:
         self._create_transcription_section()
         self._create_control_buttons()
 
-
-    def _create_scrollable_main_frame(self):
-        """Create a scrollable main frame for the application"""
-        # Create canvas and scrollbar
-        self.canvas = tk.Canvas(self.root, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-
-        # Configure scrolling
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-
-        # Create window in canvas
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        # Bind canvas resize to update scroll region
-        def on_canvas_configure(event):
-            self.canvas.itemconfig(self.canvas_window, width=event.width)
-        self.canvas.bind('<Configure>', on_canvas_configure)
-
-        # Bind mousewheel to scroll
-        def on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        def bind_mousewheel(event):
-            self.canvas.bind_all("<MouseWheel>", on_mousewheel)
-
-        def unbind_mousewheel(event):
-            self.canvas.unbind_all("<MouseWheel>")
-
-        self.canvas.bind('<Enter>', bind_mousewheel)
-        self.canvas.bind('<Leave>', unbind_mousewheel)
-
-        # Pack canvas and scrollbar with proper spacing
-        self.canvas.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=20)
-        self.scrollbar.pack(side="right", fill="y", padx=(10, 20), pady=20)
-
-        # Set main_frame to scrollable_frame for compatibility
-        self.main_frame = self.scrollable_frame
-
     def _position_window(self):
         """Position window in bottom-left corner of the screen"""
         self.root.update_idletasks()
-        screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         window_width = 480
-        window_height = 600
-        x_position = 20  # 20px margin from left
-        y_position = screen_height - window_height - 20  # 20px margin from bottom
-
+        window_height = 650
+        x_position = 20
+        y_position = screen_height - window_height - 60
         self.root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
 
     def _create_header(self):
         """Create the application header"""
-        header_frame = ttk.Frame(self.main_frame)
-        header_frame.pack(fill=X, pady=(0, 20))
+        header_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        header_frame.pack(fill="x", pady=(0, 15))
 
-        # Create left and right sections - logo on left, text on right
-        logo_frame = ttk.Frame(header_frame)
-        logo_frame.pack(side=tk.LEFT, pady=(0, 0))
+        # Logo and text container
+        content_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        content_frame.pack(anchor="w")
 
-        text_frame = ttk.Frame(header_frame)
-        text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=(16, 0))
+        # Logo
+        logo_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+        logo_frame.pack(side="left", padx=(0, 15))
 
-        # Logo image on the left
         try:
-            # Load the whispertux.png image
-            from PIL import Image, ImageTk
-
-            # Open and resize the image to be wider
+            from PIL import Image
             img = Image.open("assets/whispertux.png")
-            # Resize to 60x45 for wider appearance and better centering
-            img = img.resize((80, 65), Image.Resampling.LANCZOS)
-            self.logo_image = ImageTk.PhotoImage(img)
-
-            logo_label = ttk.Label(
-                logo_frame,
-                image=self.logo_image
-            )
-            # Add bottom margin to better center with the two text lines
-            logo_label.pack(pady=(0, 0))
-
+            img = img.resize((70, 60), Image.Resampling.LANCZOS)
+            self.logo_image = ctk.CTkImage(light_image=img, dark_image=img, size=(70, 60))
+            logo_label = ctk.CTkLabel(logo_frame, image=self.logo_image, text="")
+            logo_label.pack()
         except Exception as e:
             print(f"Failed to load whispertux.png: {e}")
-            # Fallback: show a simple text logo
-            logo_label = ttk.Label(
-                logo_frame,
-                text="🎤",
-                font=("Arial", 22)
-            )
-            logo_label.pack(pady=(0, 8))
+            logo_label = ctk.CTkLabel(logo_frame, text="", font=ctk.CTkFont(size=28))
+            logo_label.pack()
 
-        # Title and subtitle on the right of the logo
-        title_label = ttk.Label(
-            text_frame,
-            text="whispertux",
-            font=("Arial", 18, "bold"),
-            bootstyle=INFO  # Brighter blue color
-        )
-        title_label.pack(anchor=tk.W)
+        # Text
+        text_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+        text_frame.pack(side="left", pady=(8, 0))
 
-        subtitle_label = ttk.Label(
-            text_frame,
-            text="Voice Dictation for Linux",
-            font=("Arial", 10, "bold"),
-            bootstyle=PRIMARY # Brighter color instead of SECONDARY
-        )
-        subtitle_label.pack(anchor=tk.W)
+        title_label = ctk.CTkLabel(text_frame, text="whispertux", font=ctk.CTkFont(size=22, weight="bold"), text_color="#3B8ED0")
+        title_label.pack(anchor="w")
+
+        subtitle_label = ctk.CTkLabel(text_frame, text="Voice Dictation for Linux", font=ctk.CTkFont(size=11), text_color="#8B8B8B")
+        subtitle_label.pack(anchor="w")
 
     def _create_status_section(self):
         """Create the status display section"""
-        status_frame = ttk.LabelFrame(self.main_frame, text="Status", padding=10)
-        status_frame.pack(fill=X, pady=(0, 10))
+        status_frame = ctk.CTkFrame(self.main_frame)
+        status_frame.pack(fill="x", pady=(0, 10))
 
-        # Main status on the right
-        status_main_frame = ttk.Frame(status_frame)
-        status_main_frame.pack(fill=X)
+        # Header
+        header = ctk.CTkFrame(status_frame, fg_color="transparent")
+        header.pack(fill="x", padx=15, pady=(12, 8))
 
-        self.status_label = ttk.Label(
-            status_main_frame,
-            text="Ready",
-            font=("Arial", 12, "bold"),
-            bootstyle=SUCCESS
-        )
-        self.status_label.pack(side=RIGHT)
+        ctk.CTkLabel(header, text="Status", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
 
-        # Settings info on the left - vertical layout
-        settings_info_frame = ttk.Frame(status_main_frame)
-        settings_info_frame.pack(side=LEFT, fill=X, expand=True)
+        self.status_label = ctk.CTkLabel(header, text="Ready", font=ctk.CTkFont(size=12, weight="bold"), text_color="#2d7d46")
+        self.status_label.pack(side="right")
 
-        # Model info
-        model_info_frame = ttk.Frame(settings_info_frame)
-        model_info_frame.pack(fill=X, pady=1)
+        # Info grid
+        info_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
+        info_frame.pack(fill="x", padx=15, pady=(0, 12))
 
-        ttk.Label(model_info_frame, text="Model:", font=("Arial", 9)).pack(side=LEFT)
-        self.model_display_label = ttk.Label(
-            model_info_frame,
-            text=self.config.get_setting('model', 'base'),
-            font=("Arial", 9, "bold"),
-            bootstyle=INFO
-        )
-        self.model_display_label.pack(side=LEFT, padx=(5, 0))
+        # Model
+        model_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        model_row.pack(fill="x", pady=2)
+        ctk.CTkLabel(model_row, text="Model:", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.model_display_label = ctk.CTkLabel(model_row, text=self.config.get_setting('model', 'base'), font=ctk.CTkFont(size=11, weight="bold"), text_color="#3B8ED0")
+        self.model_display_label.pack(side="left", padx=(8, 0))
 
-        # Shortcut info
-        shortcut_info_frame = ttk.Frame(settings_info_frame)
-        shortcut_info_frame.pack(fill=X, pady=1)
+        # Shortcut
+        shortcut_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        shortcut_row.pack(fill="x", pady=2)
+        ctk.CTkLabel(shortcut_row, text="Shortcut:", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.shortcut_display_label = ctk.CTkLabel(shortcut_row, text=self.config.get_setting('primary_shortcut', 'F12'), font=ctk.CTkFont(size=11, weight="bold"), text_color="#3B8ED0")
+        self.shortcut_display_label.pack(side="left", padx=(8, 0))
 
-        ttk.Label(shortcut_info_frame, text="Shortcut:", font=("Arial", 9)).pack(side=LEFT)
-        self.shortcut_display_label = ttk.Label(
-            shortcut_info_frame,
-            text=self.config.get_setting('primary_shortcut', 'F12'),
-            font=("Arial", 9, "bold"),
-            bootstyle=INFO
-        )
-        self.shortcut_display_label.pack(side=LEFT, padx=(5, 0))
+        # Key delay
+        delay_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        delay_row.pack(fill="x", pady=2)
+        ctk.CTkLabel(delay_row, text="Key Delay:", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.key_delay_display_label = ctk.CTkLabel(delay_row, text=f"{self.config.get_setting('key_delay', 15)}ms", font=ctk.CTkFont(size=11, weight="bold"), text_color="#3B8ED0")
+        self.key_delay_display_label.pack(side="left", padx=(8, 0))
 
-        # Key delay info
-        key_delay_info_frame = ttk.Frame(settings_info_frame)
-        key_delay_info_frame.pack(fill=X, pady=1)
-
-        ttk.Label(key_delay_info_frame, text="Key Delay:", font=("Arial", 9)).pack(side=LEFT)
-        self.key_delay_display_label = ttk.Label(
-            key_delay_info_frame,
-            text=f"{self.config.get_setting('key_delay', 15)}ms",
-            font=("Arial", 9, "bold"),
-            bootstyle=INFO
-        )
-        self.key_delay_display_label.pack(side=LEFT, padx=(5, 0))
-
-        # Microphone info
-        mic_info_frame = ttk.Frame(settings_info_frame)
-        mic_info_frame.pack(fill=X, pady=1)
-
-        ttk.Label(mic_info_frame, text="Microphone:", font=("Arial", 9)).pack(side=LEFT)
-        self.audio_device_display_label = ttk.Label(
-            mic_info_frame,
-            text=self._get_current_audio_device_name(),
-            font=("Arial", 9, "bold"),
-            bootstyle=INFO,
-            wraplength=220,
-            justify=LEFT
-        )
-        self.audio_device_display_label.pack(side=LEFT, padx=(5, 0))
-
+        # Microphone
+        mic_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        mic_row.pack(fill="x", pady=2)
+        ctk.CTkLabel(mic_row, text="Microphone:", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.audio_device_display_label = ctk.CTkLabel(mic_row, text=self._get_current_audio_device_name(), font=ctk.CTkFont(size=11, weight="bold"), text_color="#3B8ED0", wraplength=280)
+        self.audio_device_display_label.pack(side="left", padx=(8, 0))
 
     def _create_audio_section(self):
         """Create the audio monitoring section with waveform visualizer"""
-        audio_frame = ttk.LabelFrame(self.main_frame, text="Audio Level", padding=10)
-        audio_frame.pack(fill=X, pady=(0, 10))
+        audio_frame = ctk.CTkFrame(self.main_frame)
+        audio_frame.pack(fill="x", pady=(0, 10))
 
-        # Waveform visualizer widget
-        self.waveform_visualizer = WaveformVisualizer(
-            audio_frame,
-            width=420,
-            height=120
-        )
-        self.waveform_visualizer.pack(fill=X, pady=5, expand=True)
+        ctk.CTkLabel(audio_frame, text="Audio Level", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=15, pady=(12, 8))
+
+        # Waveform visualizer (uses tkinter Frame internally)
+        viz_container = ctk.CTkFrame(audio_frame, fg_color="transparent")
+        viz_container.pack(fill="x", padx=15, pady=(0, 12))
+
+        self.waveform_visualizer = WaveformVisualizer(viz_container, width=420, height=120)
+        self.waveform_visualizer.pack(fill="x", expand=True)
 
     def _create_transcription_section(self):
         """Create the transcription display section"""
-        trans_frame = ttk.LabelFrame(self.main_frame, text="Transcription", padding=10)
-        trans_frame.pack(fill=BOTH, expand=True, pady=(0, 10))
+        trans_frame = ctk.CTkFrame(self.main_frame)
+        trans_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        # Scrollable text widget for transcription
-        text_frame = ttk.Frame(trans_frame)
-        text_frame.pack(fill=BOTH, expand=True)
+        ctk.CTkLabel(trans_frame, text="Transcription", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=15, pady=(12, 8))
 
-        self.transcription_text = tk.Text(
-            text_frame,
-            height=8,
-            wrap=tk.WORD,
-            font=("Arial", 10),
-            bg="#2b2b2b",  # Dark background to match theme
-            fg="#ffffff",  # White text
-            insertbackground="#ffffff",  # White cursor
-            selectbackground="#404040"  # Selection color
-        )
+        # Text widget
+        text_container = ctk.CTkFrame(trans_frame, fg_color="transparent")
+        text_container.pack(fill="both", expand=True, padx=15, pady=(0, 8))
 
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(text_frame, orient=VERTICAL)
-        scrollbar.pack(side=RIGHT, fill=Y)
+        self.transcription_text = ctk.CTkTextbox(text_container, height=120, font=ctk.CTkFont(size=11), wrap="word")
+        self.transcription_text.pack(fill="both", expand=True)
 
-        self.transcription_text.pack(side=LEFT, fill=BOTH, expand=True)
-        self.transcription_text.config(yscrollcommand=scrollbar.set)
-        scrollbar.config(command=self.transcription_text.yview)
+        # Buttons
+        buttons_frame = ctk.CTkFrame(trans_frame, fg_color="transparent")
+        buttons_frame.pack(fill="x", padx=15, pady=(0, 12))
 
-        # Add buttons
-        buttons_frame = ttk.Frame(trans_frame)
-        buttons_frame.pack(pady=(5, 0))
-
-        copy_button = ttk.Button(
-            buttons_frame,
-            text="Copy",
-            command=self._copy_all_transcription,
-            bootstyle="info",
-            width=8
-        )
-        copy_button.pack(side=LEFT, padx=(0, 5))
-
-        clear_button = ttk.Button(
-            buttons_frame,
-            text="Clear",
-            command=self._clear_transcription,
-            bootstyle="secondary",
-            width=8
-        )
-        clear_button.pack(side=LEFT)
-
+        ctk.CTkButton(buttons_frame, text="Copy", command=self._copy_all_transcription, width=80).pack(side="left")
+        ctk.CTkButton(buttons_frame, text="Clear", command=self._clear_transcription, width=80, fg_color="#4a4a4a", hover_color="#3a3a3a").pack(side="left", padx=8)
 
     def _create_control_buttons(self):
         """Create the main control buttons"""
-        button_frame = ttk.Frame(self.main_frame)
-        button_frame.pack(fill=X, pady=(10, 0))
+        button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        button_frame.pack(fill="x", pady=(5, 0))
 
-        # Quit button (far left)
-        quit_button = ttk.Button(
-            button_frame,
-            text="Quit",
-            command=self._on_closing,
-            bootstyle=DANGER,
-            width=10
-        )
-        quit_button.pack(side=LEFT)
+        ctk.CTkButton(button_frame, text="Quit", command=self._on_closing, width=90, fg_color="#c42b1c", hover_color="#a52714").pack(side="left")
+        ctk.CTkButton(button_frame, text="Settings", command=self._show_settings, width=100, fg_color="#4a4a4a", hover_color="#3a3a3a").pack(side="left", padx=10)
 
-        # Settings button (center-left)
-        settings_button = ttk.Button(
-            button_frame,
-            text="Settings",
-            command=self._show_settings,
-            bootstyle=SECONDARY,
-            width=12
-        )
-        settings_button.pack(side=LEFT, padx=(10, 0))
-
-        # Main record/stop button (right)
-        self.record_button = ttk.Button(
-            button_frame,
-            text="Record",
-            command=self._toggle_recording,
-            bootstyle=SUCCESS,
-            width=15
-        )
-        self.record_button.pack(side=RIGHT)
+        self.record_button = ctk.CTkButton(button_frame, text="Record", command=self._toggle_recording, width=130, height=40, fg_color="#2d7d46", hover_color="#236b38", font=ctk.CTkFont(size=13, weight="bold"))
+        self.record_button.pack(side="right")
 
     def _setup_global_shortcuts(self):
         """Set up global keyboard shortcuts"""
         try:
-            from src.global_shortcuts import GlobalShortcuts
             keyboard_device = self.config.get_setting('keyboard_device', '')
             device_path = keyboard_device if keyboard_device else None
-
             self.global_shortcuts = GlobalShortcuts(
                 primary_key=self.config.get_setting('primary_shortcut', 'F12'),
                 callback=self._toggle_recording,
                 device_path=device_path
             )
             self.global_shortcuts.start()
-            print(f"Global shortcuts initialized")
+            print("Global shortcuts initialized")
         except Exception as e:
             print(f"ERROR: Failed to setup global shortcuts: {e}")
-            # Still allow the app to run without global shortcuts
 
     def _start_audio_monitor(self):
         """Start the audio level monitoring thread"""
         def monitor_audio():
             while hasattr(self, 'root') and self.root:
                 try:
-                    # Get audio level from capture device
                     level = self.audio_capture.get_audio_level()
-
-                    # Update progress bar on main thread
                     if self.root:
-                        self.root.after_idle(self._update_audio_level, level)
-
-                    time.sleep(0.05)  # Update ~20 times per second
+                        self.root.after(0, self._update_audio_level, level)
+                    time.sleep(0.05)
                 except:
                     break
 
@@ -1315,15 +823,11 @@ class WhisperTuxApp:
 
     def _stop_audio_monitor(self):
         """Stop the audio level monitoring thread"""
-        if hasattr(self, 'monitor_thread') and self.monitor_thread and self.monitor_thread.is_alive():
-            # The monitor_audio function checks for self.root existence, so setting it to None will stop the loop
-            pass  # Thread will stop automatically when recording ends
+        pass
 
     def _update_audio_level(self, level):
-        """Update the waveform visualizer with audio level data (called from main thread)"""
+        """Update the waveform visualizer with audio level data"""
         if self.waveform_visualizer:
-            # Always update the visualizer with live audio data
-            # The visualizer will handle different display modes based on recording state
             self.waveform_visualizer.update_audio_data(level)
 
     def _reset_audio_level(self):
@@ -1334,18 +838,18 @@ class WhisperTuxApp:
     def _clear_transcription(self):
         """Clear the transcription text area"""
         if self.transcription_text:
-            self.transcription_text.delete(1.0, tk.END)
+            self.transcription_text.delete("1.0", "end")
 
     def _copy_all_transcription(self):
         """Copy all transcription text to clipboard"""
         if self.transcription_text:
-            text_content = self.transcription_text.get(1.0, tk.END).strip()
+            text_content = self.transcription_text.get("1.0", "end").strip()
             if text_content:
-                self.transcription_text.clipboard_clear()
-                self.transcription_text.clipboard_append(text_content)
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text_content)
 
     def _toggle_recording(self):
-        """Toggle recording state - main entry point for recording control"""
+        """Toggle recording state"""
         if self.is_recording:
             self._stop_recording()
         else:
@@ -1360,21 +864,18 @@ class WhisperTuxApp:
             self.is_recording = True
             self._update_ui_recording_state()
 
-            # Start audio monitoring and waveform animation for live visualization
             self._start_audio_monitor()
             if self.waveform_visualizer:
                 self.waveform_visualizer.start_animation()
 
-            # Start audio capture in a separate thread
             def record_audio():
                 try:
                     self.audio_capture.start_recording()
                 except Exception as e:
-                    self.root.after_idle(self._show_error, f"Failed to start recording: {e}")
-                    self.root.after_idle(self._stop_recording)
+                    self.root.after(0, self._show_error, f"Failed to start recording: {e}")
+                    self.root.after(0, self._stop_recording)
 
-            record_thread = threading.Thread(target=record_audio, daemon=True)
-            record_thread.start()
+            threading.Thread(target=record_audio, daemon=True).start()
 
         except Exception as e:
             self._show_error(f"Failed to start recording: {e}")
@@ -1390,101 +891,71 @@ class WhisperTuxApp:
         self.is_processing = True
         self._update_ui_recording_state()
 
-        # Stop recording and process in background thread
         def process_recording():
             try:
-                # Stop audio capture and get the recorded data
                 audio_data = self.audio_capture.stop_recording()
 
                 if audio_data is not None and len(audio_data) > 0:
-                    # Transcribe the audio
                     transcription = self.whisper_manager.transcribe_audio(audio_data)
-
-                    # Update UI and inject text on main thread (only if root still exists)
                     if hasattr(self, 'root') and self.root:
-                        self.root.after_idle(self._handle_transcription, transcription)
+                        self.root.after(0, self._handle_transcription, transcription)
                 else:
                     if hasattr(self, 'root') and self.root:
-                        self.root.after_idle(self._handle_transcription, None)
+                        self.root.after(0, self._handle_transcription, None)
 
             except Exception as e:
                 if hasattr(self, 'root') and self.root:
-                    self.root.after_idle(self._show_error, f"Transcription failed: {e}")
-                else:
-                    print(f"Transcription failed: {e}")
+                    self.root.after(0, self._show_error, f"Transcription failed: {e}")
             finally:
                 self.is_processing = False
                 if hasattr(self, 'root') and self.root:
-                    self.root.after_idle(self._update_ui_recording_state)
+                    self.root.after(0, self._update_ui_recording_state)
 
-        process_thread = threading.Thread(target=process_recording, daemon=True)
-        process_thread.start()
+        threading.Thread(target=process_recording, daemon=True).start()
 
     def _handle_transcription(self, transcription):
         """Handle completed transcription"""
-        # Stop audio monitoring, animation, and reset audio level bar after recording
         self._stop_audio_monitor()
         if self.waveform_visualizer:
             self.waveform_visualizer.stop_animation()
         self._reset_audio_level()
 
         if transcription and transcription.strip():
-            # Filter out blank audio responses from whisper
             cleaned_transcription = transcription.strip()
-
-            # Check for various blank audio indicators that should not be injected
-            blank_indicators = ["[BLANK_AUDIO]", "[blank_audio]", "(blank)", "(silence)", "[silence]", ""]
-            is_blank = any(indicator in cleaned_transcription.lower() for indicator in ["[blank_audio]", "(blank)", "(silence)", "[silence]"]) or cleaned_transcription == "[BLANK_AUDIO]"
+            blank_indicators = ["[blank_audio]", "(blank)", "(silence)", "[silence]"]
+            is_blank = any(indicator in cleaned_transcription.lower() for indicator in blank_indicators) or cleaned_transcription == "[BLANK_AUDIO]"
 
             if not is_blank and cleaned_transcription:
-                # Display in UI
-                self.transcription_text.insert(tk.END, f"{cleaned_transcription}\n")
-                self.transcription_text.see(tk.END)
+                self.transcription_text.insert("end", f"{cleaned_transcription}\n")
+                self.transcription_text.see("end")
 
-                # Inject text into focused application
                 try:
                     self.text_injector.inject_text(cleaned_transcription)
-                except Exception as e:
-                    self.status_label.config(text="❌ Text injection failed", bootstyle="danger")
+                except Exception:
+                    self.status_label.configure(text="Text injection failed", text_color="#c42b1c")
         else:
-            # Don't show popup for no speech detected, just update status
             print("No speech detected")
-            self.status_label.config(text="⚪ No speech detected", bootstyle="secondary")
-            self.transcription_text.insert(tk.END, "[No speech detected]\n")
-            self.transcription_text.see(tk.END)
+            self.status_label.configure(text="No speech detected", text_color="#8B8B8B")
+            self.transcription_text.insert("end", "[No speech detected]\n")
+            self.transcription_text.see("end")
 
     def _update_ui_recording_state(self):
         """Update UI elements based on recording state"""
         if self.is_recording:
-            self.status_label.config(text="🔴 Recording...", bootstyle=DANGER)
-            self.record_button.config(text="Stop Recording", bootstyle=DANGER)
-            # Update waveform visualizer recording state
+            self.status_label.configure(text="Recording...", text_color="#c42b1c")
+            self.record_button.configure(text="Stop Recording", fg_color="#c42b1c", hover_color="#a52714")
             if self.waveform_visualizer:
                 self.waveform_visualizer.set_recording_state(True)
         elif self.is_processing:
-            self.status_label.config(text="🔄 Processing...", bootstyle=WARNING)
-            self.record_button.config(text="Processing...", bootstyle=WARNING, state=DISABLED)
-            # Stop recording state in visualizer
+            self.status_label.configure(text="Processing...", text_color="#d4652f")
+            self.record_button.configure(text="Processing...", fg_color="#d4652f", hover_color="#b85528", state="disabled")
             if self.waveform_visualizer:
                 self.waveform_visualizer.set_recording_state(False)
         else:
-            self.status_label.config(text="✅ Ready", bootstyle=SUCCESS)
-            self.record_button.config(text="Record", bootstyle=SUCCESS, state=NORMAL)
-            # Stop recording state in visualizer
+            self.status_label.configure(text="Ready", text_color="#2d7d46")
+            self.record_button.configure(text="Record", fg_color="#2d7d46", hover_color="#236b38", state="normal")
             if self.waveform_visualizer:
                 self.waveform_visualizer.set_recording_state(False)
-
-    def _on_model_changed(self, event=None):
-        """Handle model selection change"""
-        new_model = self.model_combo.get()
-        self.config.set_setting('model', new_model)
-        self.config.save_config()
-
-        # Update whisper manager with new model
-        try:
-            self.whisper_manager.set_model(new_model)
-        except Exception as e:
-            self._show_error(f"Failed to change model: {e}")
 
     def _show_settings(self):
         """Show settings dialog"""
@@ -1494,14 +965,11 @@ class WhisperTuxApp:
         """Get the display name of the current audio device"""
         try:
             configured_device_id = self.config.get_setting('audio_device', None)
-
             if configured_device_id is None:
                 return "System Default"
 
-            # Get the current device info from audio capture
             current_device_info = self.audio_capture.get_current_device_info()
             if current_device_info:
-                # Allow longer device names for display
                 name = current_device_info['name']
                 if len(name) > 32:
                     name = name[:29] + "..."
@@ -1513,186 +981,112 @@ class WhisperTuxApp:
 
     def _update_shortcut_display(self):
         """Update all status displays in the main window"""
-        # Update shortcut display
         if self.shortcut_display_label:
-            current_shortcut = self.config.get_setting('primary_shortcut', 'F12')
-            self.shortcut_display_label.config(text=current_shortcut)
-            print(f"Updated shortcut display to: {current_shortcut}")
+            self.shortcut_display_label.configure(text=self.config.get_setting('primary_shortcut', 'F12'))
 
-        # Update model display
         if self.model_display_label:
-            current_model = self.config.get_setting('model', 'base')
-            self.model_display_label.config(text=current_model)
-            print(f"Updated model display to: {current_model}")
+            self.model_display_label.configure(text=self.config.get_setting('model', 'base'))
 
-        # Update key delay display
         if self.key_delay_display_label:
-            key_delay = self.config.get_setting('key_delay', 15)
-            self.key_delay_display_label.config(text=f"{key_delay}ms")
-            print(f"Updated key delay display to: {key_delay}ms")
+            self.key_delay_display_label.configure(text=f"{self.config.get_setting('key_delay', 15)}ms")
 
-        # Update microphone display
         if self.audio_device_display_label:
-            current_mic = self._get_current_audio_device_name()
-            self.audio_device_display_label.config(text=current_mic)
-            print(f"Updated microphone display to: {current_mic}")
+            self.audio_device_display_label.configure(text=self._get_current_audio_device_name())
 
     def _show_error(self, message):
         """Show error message"""
         messagebox.showerror("Error", message)
 
-    def _show_info(self, message):
-        """Show info message"""
-        messagebox.showinfo("Info", message)
-
     def _show_model_download(self, callback=None):
         """Show model download dialog"""
-        from tkinter import simpledialog
+        available_models = ["base.en", "small.en", "medium.en", "large-v3", "base", "small", "medium", "large"]
 
-        # List of available models to download
-        available_models = [
-            "base.en", "small.en", "medium.en", "large-v3",
-            "base", "small", "medium", "large"
-        ]
-
-        # Create a custom dialog for model selection
-        dialog = tk.Toplevel(self.root)
+        dialog = ctk.CTkToplevel(self.root)
         dialog.title("Download Whisper Models")
-        dialog.geometry("400x300")
+        dialog.geometry("420x320")
         dialog.transient(self.root)
         dialog.grab_set()
 
-        # Center dialog
         dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() - dialog.winfo_reqwidth()) // 2
-        y = (dialog.winfo_screenheight() - dialog.winfo_reqheight()) // 2
+        x = (dialog.winfo_screenwidth() - 420) // 2
+        y = (dialog.winfo_screenheight() - 320) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        # Title
-        title_label = ttk.Label(
-            dialog,
-            text="Download Whisper Models",
-            font=("Arial", 14, "bold")
-        )
-        title_label.pack(pady=10)
+        ctk.CTkLabel(dialog, text="Download Whisper Models", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(20, 10))
+        ctk.CTkLabel(dialog, text="Select a model to download:").pack(pady=5)
 
-        # Instructions
-        info_label = ttk.Label(
-            dialog,
-            text="Select a model to download:",
-            font=("Arial", 10)
-        )
-        info_label.pack(pady=5)
-
-        # Model selection
-        model_var = tk.StringVar(value=available_models[0])
-        model_combo = ttk.Combobox(
-            dialog,
-            textvariable=model_var,
-            values=available_models,
-            state="readonly",
-            width=20
-        )
+        model_var = ctk.StringVar(value=available_models[0])
+        model_combo = ctk.CTkComboBox(dialog, variable=model_var, values=available_models, width=200)
         model_combo.pack(pady=10)
 
-        # Progress bar
-        progress = ttk.Progressbar(dialog, mode='indeterminate')
-        progress.pack(pady=10, fill=X, padx=20)
+        progress = ctk.CTkProgressBar(dialog, mode="indeterminate", width=300)
+        progress.pack(pady=10)
 
-        # Status label
-        status_label = ttk.Label(dialog, text="", font=("Arial", 9))
+        status_label = ctk.CTkLabel(dialog, text="")
         status_label.pack(pady=5)
 
-        # Buttons
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(pady=10)
+        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        button_frame.pack(pady=15)
 
         def download_model():
             selected_model = model_var.get()
-            status_label.config(text=f"Downloading {selected_model}...")
+            status_label.configure(text=f"Downloading {selected_model}...")
             progress.start()
 
             def download_thread():
                 try:
                     project_root = Path(__file__).parent
                     models_dir = project_root / "whisper.cpp" / "models"
-
-                    # Use the download script
                     import subprocess
-                    result = subprocess.run([
-                        "bash",
-                        str(models_dir / "download-ggml-model.sh"),
-                        selected_model
-                    ], cwd=str(models_dir), capture_output=True, text=True)
+                    result = subprocess.run(
+                        ["bash", str(models_dir / "download-ggml-model.sh"), selected_model],
+                        cwd=str(models_dir), capture_output=True, text=True
+                    )
 
                     if result.returncode == 0:
-                        dialog.after(100, lambda: status_label.config(text=f"✅ {selected_model} downloaded successfully!"))
-                        dialog.after(100, lambda: progress.stop())
-                        # Refresh model combo in main window
+                        dialog.after(100, lambda: status_label.configure(text=f"{selected_model} downloaded!"))
+                        dialog.after(100, progress.stop)
                         dialog.after(2000, lambda: self._refresh_model_combo())
-                        # Call the callback to refresh settings dialog if provided
                         if callback:
                             dialog.after(2000, callback)
-                        dialog.after(2000, lambda: dialog.destroy())
+                        dialog.after(2000, dialog.destroy)
                     else:
-                        dialog.after(100, lambda: status_label.config(text=f"❌ Download failed: {result.stderr[:50]}..."))
-                        dialog.after(100, lambda: progress.stop())
-
+                        dialog.after(100, lambda: status_label.configure(text=f"Download failed"))
+                        dialog.after(100, progress.stop)
                 except Exception as e:
-                    dialog.after(100, lambda: status_label.config(text=f"❌ Error: {str(e)[:50]}..."))
-                    dialog.after(100, lambda: progress.stop())
+                    dialog.after(100, lambda: status_label.configure(text=f"Error: {str(e)[:30]}"))
+                    dialog.after(100, progress.stop)
 
             threading.Thread(target=download_thread, daemon=True).start()
 
-        download_button = ttk.Button(
-            button_frame,
-            text="Download",
-            command=download_model,
-            bootstyle=SUCCESS
-        )
-        download_button.pack(side=LEFT, padx=5)
-
-        cancel_button = ttk.Button(
-            button_frame,
-            text="Cancel",
-            command=dialog.destroy,
-            bootstyle=SECONDARY
-        )
-        cancel_button.pack(side=LEFT, padx=5)
+        ctk.CTkButton(button_frame, text="Download", command=download_model, fg_color="#2d7d46", hover_color="#236b38").pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Cancel", command=dialog.destroy, fg_color="#4a4a4a", hover_color="#3a3a3a").pack(side="left", padx=5)
 
     def _refresh_model_combo(self):
         """Refresh the model settings after downloading new models"""
         try:
             available_models = self.whisper_manager.get_available_models()
             if available_models:
-                print(f"Available models after refresh: {available_models}")
-                # The model combo is now in the settings dialog, not main window
-                # This method is mainly for updating the current model display
                 current_model = self.config.get_setting('model', 'base')
                 if current_model not in available_models and available_models:
-                    # Update to first available model if current one doesn't exist
                     self.config.set_setting('model', available_models[0])
                     self.config.save_config()
-                    self._update_shortcut_display()  # This will update all displays
+                    self._update_shortcut_display()
         except Exception as e:
             print(f"Error refreshing model settings: {e}")
 
     def _on_closing(self):
         """Handle application closing"""
         try:
-            # Stop global shortcuts
             if self.global_shortcuts:
                 self.global_shortcuts.stop()
 
-            # Stop audio capture
             if self.is_recording:
                 self.audio_capture.stop_recording()
 
-            # Stop waveform visualizer animation
             if self.waveform_visualizer:
                 self.waveform_visualizer.stop_animation()
 
-            # Save configuration
             self.config.save_config()
 
         except Exception as e:
@@ -1704,31 +1098,22 @@ class WhisperTuxApp:
         """Start the application"""
         print("Starting WhisperTux...")
 
-        # Initialize whisper manager
         if not self.whisper_manager.initialize():
             messagebox.showerror(
                 "Initialization Error",
-                "Failed to initialize Whisper. Please ensure whisper.cpp is built.\n"
-                "Run the build scripts first."
+                "Failed to initialize Whisper. Please ensure whisper.cpp is built.\nRun the build scripts first."
             )
             return False
 
-        # Start the GUI main loop
         self.root.mainloop()
         return True
 
 
 def main():
     """Main entry point"""
-    # Ensure we're running on Linux (since this uses ydotool)
     if not sys.platform.startswith('linux'):
-        try:
-            from src.logger import log_warning
-            log_warning("This application is designed for Linux systems", "MAIN")
-        except ImportError:
-            print("Warning: This application is designed for Linux systems")
+        print("Warning: This application is designed for Linux systems")
 
-    # Create and run the application
     app = WhisperTuxApp()
     success = app.run()
 

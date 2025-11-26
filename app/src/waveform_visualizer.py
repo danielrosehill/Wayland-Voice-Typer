@@ -19,7 +19,7 @@ from matplotlib.animation import FuncAnimation
 import matplotlib.patches as patches
 
 
-class WaveformVisualizer(ttk.Frame):
+class WaveformVisualizer(tk.Frame):
     """Artistic circular real-time audio waveform visualizer widget for tkinter"""
     
     def __init__(self, parent, width=400, height=120, **kwargs):
