@@ -22,14 +22,13 @@ class ConfigManager:
         # Default configuration values
         self.default_config = {
             'primary_shortcut': 'F13',
-            'model': 'large-v3-turbo',
+            'model': 'large-v3',
             'custom_model_path': None,  # Direct path to a custom .bin model file
             'model_directories': [      # List of directories to scan for models
                 str(self.local_models_dir),
                 str(Path.home() / "ai" / "models" / "stt" / "whisper-cpp"),
             ],
             'key_delay': 15,  # Delay between keystrokes in milliseconds for ydotool
-            'use_clipboard': False,
             'window_position': None,
             'always_on_top': True,
             'theme': 'darkly',
@@ -37,6 +36,7 @@ class ConfigManager:
             'word_overrides': {},  # Dictionary of word replacements: {"original": "replacement"}
             'transcription_threads': max(1, os.cpu_count() // 2) if os.cpu_count() else 4,
             'whisper_binary': None,  # Optional override for whisper-cli path
+            'operation_mode': 'live_text_entry',  # 'live_text_entry' or 'note_entry'
         }
         
         # Set up config directory and file path

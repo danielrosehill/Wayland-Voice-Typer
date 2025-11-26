@@ -19,16 +19,14 @@ class TextInjector:
         # Initialize settings from config if available
         if self.config_manager:
             self.key_delay = self.config_manager.get_setting('key_delay', 15)
-            self.use_clipboard_fallback = self.config_manager.get_setting('use_clipboard', False)
         else:
             self.key_delay = 15  # Default key delay in milliseconds
-            self.use_clipboard_fallback = False
 
         # Check if ydotool is available
         self.ydotool_available = self._check_ydotool()
 
         if not self.ydotool_available:
-            print("⚠️  ydotool not found - text injection will use clipboard fallback")
+            print("ydotool not found - text injection will use clipboard fallback")
 
     def _check_ydotool(self) -> bool:
         """Check if ydotool is available on the atiystem"""
@@ -67,16 +65,7 @@ class TextInjector:
                 return self._inject_via_clipboard(processed_text)
 
         except Exception as e:
-            print(f"Primary injection method failed: {e}")
-
-            # Try clipboard fallback if ydotool failed
-            if self.ydotool_available and self.use_clipboard_fallback:
-                print("Falling back to clipboard method...")
-                try:
-                    return self._inject_via_clipboard(processed_text)
-                except Exception as e2:
-                    print(f"Clipboard fallback also failed: {e2}")
-
+            print(f"Text injection failed: {e}")
             return False
 
     def _preprocess_text(self, text: str) -> str:
@@ -245,15 +234,9 @@ class TextInjector:
             print(f"ERROR: Clipboard injection failed: {e}")
             return False
 
-    def set_use_clipboard_fallback(self, use_clipboard: bool):
-        """Enable or disable clipboard fallback"""
-        self.use_clipboard_fallback = use_clipboard
-        print(f"Clipboard fallback {'enabled' if use_clipboard else 'disabled'}")
-
     def get_status(self) -> dict:
         """Get the status of the text injector"""
         return {
             'ydotool_available': self.ydotool_available,
-            'key_delay': self.key_delay,
-            'use_clipboard_fallback': self.use_clipboard_fallback
+            'key_delay': self.key_delay
         }

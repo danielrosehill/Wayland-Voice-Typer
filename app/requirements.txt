@@ -1,7 +1,5 @@
-# GUI and styling
-customtkinter>=5.2.0
-pillow>=10.0.0
-matplotlib>=3.5.0
+# GUI - PySide6 (Qt for Python)
+PySide6>=6.5.0
 
 # Audio processing
 sounddevice>=0.4.6
